@@ -1,4 +1,4 @@
-myocard-package-name
+myocard-egm-features
 Copyright (c) 2026 Daniel Klein and contributors
 
 This product is part of the myocard-labs cardiac signal processing toolkit:
@@ -7,18 +7,25 @@ This product is part of the myocard-labs cardiac signal processing toolkit:
 Licensed under the MIT License (see LICENSE).
 
 ---------------------------------------------------------------------
-Third-party data sources
+Third-party software acknowledgements
 ---------------------------------------------------------------------
 
-Delete the lines below that don't apply to this specific package.
-Keep the lines for any external data the package reads, writes, or
-ships fixtures derived from.
+This package's feature implementations rely on the following permissively-
+licensed scientific Python libraries:
 
-This software uses the Intracardiac Atrial Fibrillation Database (IAFDB)
-from PhysioNet, doi:10.13026/C23S33, distributed under the Open Data
-Commons Attribution License v1.0 (ODC-By v1.0). See:
-  https://physionet.org/content/iafdb/1.0.0/
+- NumPy (BSD-3-Clause) — https://github.com/numpy/numpy
+- SciPy (BSD-3-Clause) — https://github.com/scipy/scipy
+- pandas (BSD-3-Clause) — https://github.com/pandas-dev/pandas
+- antropy (BSD-3-Clause) — https://github.com/raphaelvallat/antropy
 
-This software uses Finitewave, a Python framework for cardiac
-electrophysiology simulation, BSD-3-Clause licensed. See:
-  https://github.com/TiNezlobinsky/Finitewave
+These licenses do not require attribution in derivative works; this list
+is informational. See each library's own LICENSE for the canonical terms.
+
+---------------------------------------------------------------------
+Data sources
+---------------------------------------------------------------------
+
+This package does NOT ship or read any datasets. It operates on in-memory
+numpy arrays handed to it by upstream consumers (e.g. `myocard-egm-data`,
+`myocard-iafdb-pipeline`, `myocard-synthetic-egm-pipeline`). Dataset
+attribution belongs in the producer repos that load the underlying data.
