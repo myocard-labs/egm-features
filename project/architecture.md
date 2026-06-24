@@ -155,6 +155,44 @@ Same reasoning as why this repo wraps the trivial numpy features
 above. The wrappers are the project's *policy* layer on top of the
 canonical algorithm implementations.
 
+### Defaults policy — math constants vs project-policy values
+
+The "wrappers are the policy layer" argument above runs into
+[[feedback-library-defaults]]: library packages ship no hardcoded
+defaults for *policy* values. So we split each parameter into
+**math constants** (the standard from the canonical paper — keep as
+default) vs **policy values** (the project's choice — required, no
+default; `bundle.extract_all` provides the project standard
+automatically).
+
+| Parameter | Kind | Treatment |
+|---|---|---|
+| `sample_entropy.m`, `sample_entropy.r_frac` | math (Richman 2000 + Pincus 1991 standards) | default |
+| `higuchi_fractal_dimension.k_max` | math-ish (literature 8–64; we pick 10) | default |
+| `shannon_entropy.n_bins` | math-ish (Sturges' rule gives 10 at T=512) | default |
+| `sec_peak_count.threshold_frac` | policy (clinical convention varies 30–50%) | required |
+| `lempel_ziv_complexity.binarize_method` | policy (project choice between `"median"`/`"zero"`) | required |
+| `activation_position.method` | policy (project choice between `"dvdt_max"`/`"abs_peak"`) | required |
+
+Direct callers of the individual extractors must pass the policy
+parameters explicitly. `bundle.extract_all` hardcodes the project's
+standard policy values internally:
+
+```python
+df["sec_peak_count"]         = sec_peak_count(x, threshold_frac=0.3)
+df["lempel_ziv_complexity"]  = lempel_ziv_complexity(x, binarize_method="median")
+df["activation_position"]    = activation_position(x, method="dvdt_max")
+```
+
+So consumers calling `extract_all` get the standard bundle automatically.
+Consumers calling individual extractors are forced to think about
+which policy they want — which prevents accidental drift across the
+codebase.
+
+Recording these standard values: they live in `bundle.py` as plain
+constants, with cross-references to the `docs/theory.md` sections
+that justify them.
+
 ### Why per-trace shape (not polymorphic over `(T,)` and `(N, T)`)
 
 Each per-feature function takes a 1D trace `(T,)` and returns a
