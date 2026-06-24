@@ -116,7 +116,9 @@ select = [
   "RUF",  # ruff-specific
 ]
 ignore = [
-  "E501",  # line length handled by formatter
+  "E501",   # line length handled by formatter
+  "RUF002", # allow Greek letters (σ, π, μ, etc.) in docstrings — they're the
+            # clearest notation for the math this library implements
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -172,11 +174,15 @@ no_implicit_optional = true
 show_error_codes = true
 files = ["src", "tests"]
 
-# scipy + antropy ship without complete py.typed support; ignore_missing_imports
-# keeps mypy quiet on those upstream imports.
+# scipy + antropy + pandas ship without complete py.typed support;
+# ignore_missing_imports keeps mypy quiet on those upstream imports.
+# (pandas has a pandas-stubs package; we don't pin it as a dev dep yet —
+# adding it when bundle.py's DataFrame ergonomics get richer would be a
+# natural moment.)
 [[tool.mypy.overrides]]
 module = [
   "scipy.*",
   "antropy.*",
+  "pandas.*",
 ]
 ignore_missing_imports = true
