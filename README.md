@@ -1,116 +1,22 @@
-# myocard-package-name
+# myocard-egm-features
 
-> One-sentence pitch: PACKAGE_DESCRIPTION.
+> Per-trace morphology + spectral + complexity feature extractors for intracardiac bipolar EGM signals.
 
-Part of the [myocard-labs](https://github.com/myocard-labs) cardiac signal processing toolkit.
+Part of the [myocard-labs](https://github.com/myocard-labs) cardiac signal-processing toolkit.
 
 > [!NOTE]
-> This file was scaffolded from
-> [`myocard-labs/python-template`](https://github.com/myocard-labs/python-template).
-> If you're looking at the template repo itself, see `TEMPLATE_USAGE.md` for the
-> rename procedure. The template is for **library packages only** — meta repos
-> (`intracardiac-platform`) and the paper repo (`intracardiac-paper`) have their
-> own hand-built skeletons.
+> Pre-v0.1.0 — this repo is being built up in [Refactor Step 4](https://github.com/myocard-labs/intracardiac-platform/blob/main/project/refactor_checklist.md) of the polyrepo refactor. The substantive README below replaces this stub once Block 5 of the egm-features build lands.
 
 ---
 
-## Why
+## What it is (one-liner)
 
-Two or three paragraphs answering:
+A NumPy/SciPy/antropy library that takes a 1D bipolar-EGM trace + a sample rate and returns scalar features: peak-to-peak amplitude, zero-crossings, activation position, secondary-peak count, spectral centroid / entropy / dominant frequency, sample entropy, Shannon entropy, Lempel-Ziv complexity, Higuchi fractal dimension. Plus a `bundle.extract_all` helper that runs all 11 features over an `(N, T)` batch and returns a pandas DataFrame.
 
-- What problem does this package solve?
-- Where does it sit in the broader pipeline (upstream/downstream packages)?
-- Who would actually want to install it standalone?
-
-Be concrete. Hiring managers and future collaborators read this section first.
-
----
-
-## Install
-
-From PyPI (when published):
-
-```bash
-pip install myocard-package-name
-```
-
-From source (during pre-1.0 iteration):
-
-```bash
-pip install git+https://github.com/myocard-labs/GITHUB_REPO_NAME.git
-```
-
-Editable install for development:
-
-```bash
-git clone https://github.com/myocard-labs/GITHUB_REPO_NAME.git
-cd GITHUB_REPO_NAME
-pip install -e ".[dev]"
-pre-commit install
-```
-
----
-
-## Quick start
-
-A copy-pasteable example that demonstrates the headline use case. Keep it small:
-
-```bash
-myocard-foo --input data/sample.h5 --output results/
-```
-
-If the package is library-only with no CLI, link to the Programmatic Usage section below.
-
----
-
-## Programmatic usage
-
-```python
-import myocard_package_name
-
-# A short example showing the primary public API.
-# Prefer one tight working example over five partial ones.
-```
-
-Link to longer examples in `examples/` or to `intracardiac-platform/examples/` for the cross-package workflows.
-
----
-
-## Tests
-
-```bash
-pytest                  # full suite
-pytest --cov            # with coverage
-ruff check .            # lint
-ruff format --check .   # format check
-mypy                    # type check
-```
-
-CI runs the same checks on Python 3.10, 3.11, and 3.12 — see `.github/workflows/ci.yml`.
-
----
-
-## Project status
-
-This package is part of the in-progress [myocard-labs](https://github.com/myocard-labs) refactor. Pre-1.0 — expect breaking changes across minor versions until the schema/API stabilizes. See `intracardiac-platform/project/project_plan.md` for roadmap.
-
----
-
-## Citation
-
-If you use this software in academic work, please cite:
-
-```bibtex
-@software{klein_myocard_package_name_2026,
-  author  = {Klein, Daniel},
-  title   = {myocard-package-name: PACKAGE_DESCRIPTION},
-  year    = {2026},
-  url     = {https://github.com/myocard-labs/GITHUB_REPO_NAME},
-}
-```
+See `docs/theory.md` for the math behind each feature once it lands (Block 2 of the build).
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Attribution requirements for data sources used by this package are listed in [NOTICE](NOTICE).
+MIT — see [LICENSE](LICENSE). Third-party software-license acknowledgements are in [NOTICE](NOTICE).

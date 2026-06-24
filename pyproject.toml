@@ -1,16 +1,17 @@
 # ---------------------------------------------------------------------------
-# pyproject.toml — myocard-labs python template
+# pyproject.toml — myocard-egm-features
 #
-# Find/replace before publishing:
-#   myocard-package-name   → PyPI distribution name (dash-separated, with myocard- prefix)
-#   myocard_package_name   → Python import name (underscore-separated)
-#   PACKAGE_DESCRIPTION    → one-line summary used by PyPI
-#   GITHUB_REPO_NAME       → bare repo name (no myocard- prefix)
+# Per-trace morphology + spectral + complexity feature extractors for
+# intracardiac bipolar EGM signals. NumPy/SciPy-only library — no torch,
+# no HDF5 I/O (egm-data owns that). The feature math lives in three
+# modules (time_domain, frequency, complexity) with a thin bundle helper
+# that runs all 11 features over a batch of traces and returns a tidy
+# pandas DataFrame.
 #
 # Convention recap (LOCKED-IN 2026-06-13, see intracardiac-platform/project/refactor_checklist.md):
-#   GitHub repo  : egm-contracts                  (bare)
-#   PyPI dist    : myocard-egm-contracts          (myocard- prefix)
-#   Import name  : myocard_egm_contracts          (underscore)
+#   GitHub repo  : egm-features                  (bare)
+#   PyPI dist    : myocard-egm-features          (myocard- prefix)
+#   Import name  : myocard_egm_features          (underscore)
 # ---------------------------------------------------------------------------
 
 [build-system]
@@ -18,16 +19,24 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "myocard-package-name"
+name = "myocard-egm-features"
 version = "0.1.0"
-description = "PACKAGE_DESCRIPTION"
+description = "Per-trace morphology + spectral + complexity feature extractors for intracardiac bipolar EGM signals."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 authors = [
   { name = "Daniel Klein", email = "daniel.anthony.klein.88@gmail.com" },
 ]
-keywords = ["cardiac", "electrophysiology", "signal-processing", "egm"]
+keywords = [
+  "cardiac",
+  "electrophysiology",
+  "signal-processing",
+  "egm",
+  "feature-extraction",
+  "entropy",
+  "fractal-dimension",
+]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
@@ -42,9 +51,10 @@ classifiers = [
 ]
 
 dependencies = [
-  # Runtime deps go here. Keep this lean. Common floor: numpy + h5py.
-  # "numpy>=1.26",
-  # "h5py>=3.10",
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "pandas>=2.0",
+  "antropy>=0.1.6",
 ]
 
 [project.optional-dependencies]
@@ -58,21 +68,21 @@ dev = [
 ]
 
 [project.urls]
-Homepage      = "https://github.com/myocard-labs/GITHUB_REPO_NAME"
-Repository    = "https://github.com/myocard-labs/GITHUB_REPO_NAME"
-Issues        = "https://github.com/myocard-labs/GITHUB_REPO_NAME/issues"
+Homepage      = "https://github.com/myocard-labs/egm-features"
+Repository    = "https://github.com/myocard-labs/egm-features"
+Issues        = "https://github.com/myocard-labs/egm-features/issues"
 Organization  = "https://github.com/myocard-labs"
 
-# Optional CLI entry points — uncomment + edit when the package ships commands.
-# [project.scripts]
-# myocard-foo = "myocard_package_name.cli:main"
+# No CLI — egm-features is a library only. Per-trace feature extraction is
+# called from notebooks, egm-classifier diagnostics, egm-studio's features
+# view, and the synthetic v2 sim-realism comparison work.
 
 # ---------------------------------------------------------------------------
 # Hatch
 # ---------------------------------------------------------------------------
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/myocard_package_name"]
+packages = ["src/myocard_egm_features"]
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -132,12 +142,11 @@ addopts = [
 ]
 filterwarnings = [
   "error",
-  # Add per-package allowlist below as needed, e.g.:
-  # "ignore::DeprecationWarning:some_third_party_lib",
+  # Per-package allowlist below. Add as needed once test failures surface.
 ]
 
 [tool.coverage.run]
-source = ["src/myocard_package_name"]
+source = ["src/myocard_egm_features"]
 branch = true
 
 [tool.coverage.report]
@@ -163,15 +172,11 @@ no_implicit_optional = true
 show_error_codes = true
 files = ["src", "tests"]
 
-# Per-module overrides for libraries without type stubs.
-# Uncomment + edit when the package starts importing one of these.
-# Listing them here when the imports aren't present triggers
-# `warn_unused_configs` and clutters the mypy output.
-#
-# [[tool.mypy.overrides]]
-# module = [
-#   "h5py.*",
-#   "scipy.*",
-#   "matplotlib.*",
-# ]
-# ignore_missing_imports = true
+# scipy + antropy ship without complete py.typed support; ignore_missing_imports
+# keeps mypy quiet on those upstream imports.
+[[tool.mypy.overrides]]
+module = [
+  "scipy.*",
+  "antropy.*",
+]
+ignore_missing_imports = true
