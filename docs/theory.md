@@ -183,9 +183,12 @@ If the trace is `T = 512` samples and the activation is centered at
 sample `k = 256`, we get `activation_position ≈ 0.5`. The test fixture
 exercises this with a few `k` values.
 
-**Parameter choices.** None for the default. A `method="abs_peak"` flag
-is reserved for the alternate convention (argmax of `|x|`), but the
-default is the dV/dt method per the wave-2 design decision.
+**Parameter choices.** `method` is a **required** parameter (policy
+value; no default per the math-vs-policy split in `project/architecture.md`).
+Project standard: `method="dvdt_max"` — the clinical convention from
+the Marchlinski / Wittkampf school. Used automatically by
+`bundle.extract_all`. Alternative: `method="abs_peak"` for the simpler
+argmax-of-`|x|` variant; direct callers pick one explicitly.
 
 **EGM interpretation.** For producer-side `activation-peak-anchored`
 traces (synthetic-egm-pipeline's default for the v1 single-activation
@@ -254,9 +257,21 @@ peaks, _ = scipy.signal.find_peaks(abs_x, prominence=threshold_frac * A_max)
 sec_peak_count = max(0, len(peaks) - 1)
 ```
 
-**Worked example 1 — single biphasic activation.** A single
-sine-pulse activation (worked example from §1.3) has exactly one local
-maximum of `|x|` at the activation peak. So `sec_peak_count = 0`.
+**Worked example 1 — single positive bump.** A signal with a single
+Gaussian-like positive bump has exactly one local maximum in `|x|` at
+the bump's peak. With threshold_frac=0.3, that one peak is the
+primary; nothing else clears the threshold. `sec_peak_count = 0`.
+
+> **Note on real biphasic EGM activations.** A *biphasic* activation
+> (positive lobe followed by negative lobe, the realistic clinical
+> case from §1.3) has TWO lobes in `|x|` of comparable magnitude.
+> `find_peaks` returns 2, and `sec_peak_count = 1` for a clean
+> biphasic. That's the algorithm's natural baseline on real EGMs —
+> the metric is most useful for discriminating clean biphasic (1)
+> from fragmented activations (3+). The §1.4 worked examples use
+> simplified positive-only bumps to make the math easier to
+> verify; the §1.3 biphasic model is the realistic activation
+> shape and gives `sec_peak_count = 1` on a clean trace.
 
 **Worked example 2 — fragmented two-component activation.** A primary
 activation of amplitude `A` followed by a secondary activation of
@@ -270,12 +285,17 @@ With `threshold_frac = 0.3`, the secondary peak's prominence
 (`A/2 = 0.5 · A`) exceeds the threshold (`0.3 · A`), so it counts.
 `sec_peak_count = 1`.
 
-**Parameter choices.** `threshold_frac = 0.3` (default; 30% of primary
-peak amplitude). The fragmentation-index family in the literature
-(Nademanee 2004 CFAE definition, Kim 2014 fractionation analyses) uses
-similar fractional thresholds, typically 30–50%. Lower values count
-more peaks (noise-sensitive); higher values miss legitimate secondary
-deflections. 0.3 is the pragmatic middle.
+**Parameter choices.** `threshold_frac` is a **required** parameter
+(policy value; no default per the math-vs-policy split in
+`project/architecture.md`). Project standard: `threshold_frac = 0.3`
+(30% of primary peak amplitude). Used automatically by
+`bundle.extract_all`. Reasoning: the fragmentation-index family in
+the literature (Nademanee 2004 CFAE definition, Kim 2014 fractionation
+analyses) uses similar fractional thresholds, typically 30–50%. Lower
+values count more peaks (noise-sensitive); higher values miss
+legitimate secondary deflections. 0.3 is the pragmatic middle.
+Direct callers can pass a different fraction (e.g. 0.5 to match the
+strict CFAE convention).
 
 **EGM interpretation.** Fragmented atrial electrograms (the "CFAE"
 phenotype Nademanee popularized) have multiple deflections per
@@ -315,6 +335,16 @@ out front cancels in every consumer.
 
 `scipy.signal.periodogram` returns two arrays: `f` (length `T/2 + 1`)
 and `P̂` (same length). We pass both to the consumers below.
+
+**PSD reuse across features.** The three frequency features below all
+consume the same `(f, P̂)` pair. To avoid recomputing the periodogram
+three times per trace when running all three (the bundle.extract_all
+hot path), the public `periodogram(signal, fs_hz)` function is exposed
+as a building block, and each feature function accepts optional
+`freqs` and `psd` keyword arguments — when both are supplied, the
+feature uses them directly and skips its internal PSD call.
+Single-feature calls stay a one-liner; multi-feature batches compute
+the PSD once.
 
 **Choice of method — why periodogram, not Welch.** Welch's method
 averages periodograms over overlapping segments, which reduces variance
@@ -576,11 +606,11 @@ A clean periodic activation has low SampEn; fragmented atrial EGM has
 higher SampEn. This is one of the seven features Sanchez 2021 reported
 as discriminating fibrotic from non-fibrotic tissue.
 
-We delegate to `antropy.sample_entropy(x, order=m, metric="chebyshev")`
-after computing `r = r_frac * x.std(ddof=0)`. Note antropy's
-`sample_entropy` takes the `r` value indirectly via the `metric`
-parameter; we'll need to verify the exact call site against the antropy
-API at implementation time.
+We delegate to
+`antropy.sample_entropy(x, order=m, tolerance=r_frac * x.std(ddof=0), metric="chebyshev")`.
+antropy accepts a custom `tolerance` directly (defaulting to
+`0.2 * std(x)` when `None`), so the full theory-spec parameter set
+(`m`, `r_frac`) maps cleanly onto the antropy call.
 
 **Reference:** Richman & Moorman 2000 (the original SampEn paper);
 Pincus 1991 (ApEn predecessor, parameter guidance still applies).
@@ -708,9 +738,21 @@ through LZ76:
 - `i=4`: candidate `"0101"`. Is "0101" a substring of `b[0..4] = "01010"`? **Yes** (at position 0). Extend: `w="0101"`, `i=5`.
 - ... continues, never finding new substrings. Loop ends. `c = 3`.
 
-So `lempel_ziv_complexity(periodic_sequence) ≈ 3 · log_2(T) / T → 0`
+So `lempel_ziv_complexity(alternating_sequence) ≈ 3 · log_2(T) / T → 0`
 for large `T`. The test fixture verifies this is small (< 0.1) for a
-pure sine.
+signal constructed to median-binarize to exactly "01010101..." (e.g.
+sample-alternating ±1 amplitudes).
+
+**Real sines give a higher value than the alternating-bit anchor.** A
+pure 50 Hz sine sampled at 1 kHz binarizes to *chunks* — each half-
+cycle is ~10 samples wide, so the binary string is
+"0000000000 1111111111 0000000000 …" rather than "01010101…". The
+dictionary takes longer to saturate over half-cycle chunks than over
+single-bit alternation, so the empirical LZ value sits around `0.26`
+for a 50 Hz sine at fs=1 kHz, N=512 — well below random (~1) but
+above the alternating-bit asymptote (<0.1). The trend is preserved
+(periodic < random) but the absolute value depends on the binary
+chunk size, not just on periodicity.
 
 *Random binary sequence:* every new short substring is novel for a
 while, so the dictionary grows fast initially. Asymptotically
@@ -719,11 +761,14 @@ verifies this is high (> 0.7) for `numpy.random.randint(0, 2, T)`.
 
 **Parameter choices:**
 
-- `binarize_method = "median"` (default). 1 if above median, 0 if
-  below. Robust to baseline drift; most common in the EGM-LZ literature.
-- A `"zero"` mode is reserved for explicit users (1 if `x > 0`, 0
-  else). For bandpassed EGMs the two methods give nearly identical
-  results since the bandpass forces `median ≈ 0`.
+- `binarize_method` is a **required** parameter (policy value; no
+  default per the math-vs-policy split in `project/architecture.md`).
+  Project standard: `binarize_method="median"` — 1 if above median, 0
+  if below; robust to baseline drift; most common in the EGM-LZ
+  literature. Used automatically by `bundle.extract_all`.
+  Alternative: `"zero"` (1 if `x > 0`, 0 else); for bandpassed EGMs
+  the two methods give nearly identical results since the bandpass
+  forces `median ≈ 0`. Direct callers pick one explicitly.
 
 **EGM interpretation.** Lempel-Ziv complexity captures the "how
 many distinct patterns are in this signal" intuition. A clean periodic
