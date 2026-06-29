@@ -20,7 +20,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "myocard-egm-features"
-version = "0.1.0"
+version = "0.1.1"
 description = "Per-trace morphology + spectral + complexity feature extractors for intracardiac bipolar EGM signals."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -83,6 +83,11 @@ Organization  = "https://github.com/myocard-labs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/myocard_egm_features"]
+# Ship py.typed (PEP 561) so downstream consumers' mypy uses our inline types
+# instead of treating the package as untyped. Matches egm-data / egm-contracts.
+artifacts = [
+  "src/myocard_egm_features/py.typed",
+]
 
 [tool.hatch.build.targets.sdist]
 include = [
