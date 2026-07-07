@@ -163,7 +163,7 @@ schema-cascade story applies in the usual order
 - **No torch dependency.** No model code, no nn.Module. Stays at the
   numpy + scipy + pandas + antropy level.
 - **No CLI.** Library only — drive it from notebooks, from
-  egm-studio's `egm-figures` recipes, or from
+  egm-studio's `egm-studio-render` recipes, or from
   synthetic-egm-pipeline's tuning loops. See
   [Consumer responsibilities](architecture.md#consumer-responsibilities).
 - **No bank-aware aggregation.** Group-by / median-per-patient /

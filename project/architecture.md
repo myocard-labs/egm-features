@@ -48,7 +48,7 @@ shape, API choices, consumer responsibilities.
   an `(N, T)` numpy array but doesn't load it; the caller does that
   via egm-data).
 - Render plots (`egm-studio` does that — both the GUI features view
-  and the `egm-figures` CLI recipes).
+  and the `egm-studio-render` CLI recipes).
 - Run analysis workflows like "compare feature distributions across
   synthetic + IAFDB banks" (see [Consumer responsibilities](#consumer-responsibilities)
   below).
@@ -230,7 +230,7 @@ The "what's a typical command-line invocation of feature extraction"
 question is answered by the consumer:
 
 - For a paper-figure-quality cross-bank comparison, run
-  `egm-figures sim-realism-comparison` (egm-studio CLI; lands in
+  `egm-studio-render <sim-realism-comparison-spec>.json` (egm-studio CLI,
   Refactor Step 6).
 - For an ad-hoc tuning loop during synthetic v2, run a notebook or a
   small driver script that imports egm-features.
@@ -270,7 +270,7 @@ elsewhere.
 
 | Workflow | Lives in | Pattern |
 |---|---|---|
-| Paper-quality figures comparing synthetic vs IAFDB feature distributions | **`egm-studio`** `figures/recipes/sim_realism_comparison.py` (lands in Refactor Step 6) | Recipe-driven, reproducible, journal-quality output via `egm-figures` CLI |
+| Paper-quality figures comparing synthetic vs IAFDB feature distributions | **`egm-studio`** `figures/recipes/sim_realism_comparison.py` (lands in Refactor Step 6) | Recipe-driven, reproducible, journal-quality output via `egm-studio-render` CLI |
 | GUI "features view" — per-trace feature values overlaid on the waveform display | **`egm-studio`** `gui/views/features.py` (lands in Refactor Step 6) | Interactive bank inspection alongside other GUI tabs |
 | Synthetic v2 tuning loops (change a sim param, recompute features, see if distributions converge toward IAFDB) | **`synthetic-egm-pipeline`** as a `synthegm-feature-compare` CLI or notebook (Phase 1.5 work) | Producer-side iteration tool |
 | Ad-hoc notebook exploration during Phase 1.5 | **`intracardiac-platform/examples/`** or local-only notebooks | Researcher-driven, not necessarily version-controlled at the analysis level |
