@@ -11,11 +11,17 @@ person who has to code-review the implementations and verify each
 function is computing the right thing — without prior expertise in
 entropy / Lempel-Ziv / fractal-dimension math.
 
-For the *what* and *where* of each feature (CLI invocation, return shape,
-column names in the bundle DataFrame), see `docs/usage.md` once it
-lands in Block 5. For the design rationale behind the library's overall
-shape (pure functions, per-trace `(T,)` inputs, no CLI), see
-`project/architecture.md`.
+For the *what* and *where* of each feature (call signatures, return
+shape, column names in the bundle DataFrame), see
+[`docs/usage.md`](usage.md). For the design rationale behind the
+library's overall shape (pure functions, per-trace `(T,)` inputs, no
+CLI), see [`project/architecture.md`](../project/architecture.md).
+
+> **Rendering note.** Equations are written in LaTeX — `$$…$$` for
+> display, `$…$` for inline. GitHub and VS Code render these as typeset
+> math; in a plain-text viewer they show as LaTeX source. Backticked
+> names (`fs_hz`, `bundle.extract_all`) are code identifiers, not math
+> symbols.
 
 ## Table of contents
 
@@ -63,17 +69,17 @@ uses it).
 
 ## Notation
 
-- `x ∈ ℝᵀ` — a single per-trace input. `T` is the sample count.
-- `T` — number of samples in the trace. Default 512 (matches the
+- $x \in \mathbb{R}^{T}$ — a single per-trace input; $T$ is the sample count.
+- $T$ — number of samples in the trace. Default 512 (matches the
   egm-classifier v1 input length at 1 kHz = 512 ms).
 - `fs_hz` — sample rate in Hz. The features that touch the time axis
   (frequency-domain ones, activation-position-as-time variants) need it;
   the dimensionless complexity features don't.
-- `t_i = i / fs_hz` — time at sample index `i`.
-- `μ(x)`, `σ(x)`, `med(x)` — mean, std (population, ddof=0), median.
+- $t_i = i / f_s$ — time at sample index $i$ (with $f_s$ = `fs_hz`).
+- $\mu(x)$, $\sigma(x)$, $\operatorname{med}(x)$ — mean, std (population, ddof=0), median.
 - `NDArray` — a `numpy.ndarray` of floating-point type; specifically
   shape `(T,)` for the per-trace functions. Batch processing over
-  `(N, T)` is `bundle.extract_all`'s job, not the individual extractors.
+  $(N, T)$ is `bundle.extract_all`'s job, not the individual extractors.
 
 ---
 
@@ -83,17 +89,17 @@ uses it).
 
 **Definition.**
 
-```
-peak_to_peak(x) = max(x) - min(x)
-```
+$$
+\text{peak\_to\_peak}(x) = \max(x) - \min(x)
+$$
 
 In mV (or whatever amplitude unit the caller passed in).
 
-**Worked example.** A pure sinusoid `x[i] = A · sin(2π f · t_i)`:
+**Worked example.** A pure sinusoid $x[i] = A \sin(2\pi f \, t_i)$:
 
-```
-max(x) = A,  min(x) = -A  →  peak_to_peak = 2A
-```
+$$
+\max(x) = A, \quad \min(x) = -A \;\;\Rightarrow\;\; \text{peak\_to\_peak} = 2A
+$$
 
 So a 1 mV-amplitude sine at any frequency has `peak_to_peak = 2.0`. The
 test fixture exercises this.
@@ -117,9 +123,9 @@ see [[white-paper-references]].
 **Definition.** Count of times the signal crosses zero between adjacent
 samples. Each crossing counts once regardless of direction.
 
-```
-zero_crossings(x) = | { i : sign(x[i]) ≠ sign(x[i-1]),  1 ≤ i < T } |
-```
+$$
+\text{zero\_crossings}(x) = \bigl| \{\, i : \operatorname{sign}(x[i]) \ne \operatorname{sign}(x[i-1]),\; 1 \le i < T \,\} \bigr|
+$$
 
 The exact-zero case (`x[i] = 0`) is folded into `sign` via NumPy's
 convention (`sign(0) = 0`), so a value of exactly zero is treated as a
@@ -130,12 +136,12 @@ never fires.
 **Worked example.** A pure sinusoid at frequency `f` over duration
 `T_seconds`:
 
-```
-zero_crossings ≈ 2 · f · T_seconds
-```
+$$
+\text{zero\_crossings} \approx 2 f \, T_{\text{seconds}}
+$$
 
-For `f = 50 Hz`, `T_seconds = 0.512 s` (= 512 samples at 1 kHz): 
-`2 · 50 · 0.512 = 51.2`, so ~51 crossings. The test fixture verifies
+For $f = 50$ Hz, $T_{\text{seconds}} = 0.512$ s (= 512 samples at 1 kHz):
+$2 \cdot 50 \cdot 0.512 = 51.2$, so ~51 crossings. The test fixture verifies
 this within ±1.
 
 **Parameter choices.** None — the count is around zero (not the per-trace
@@ -152,12 +158,12 @@ overall waveform "wobble" rather than spectral peak.
 **Definition.** Returns the fractional position (in `[0, 1]`) of the
 **maximum slope** of the signal:
 
-```
-activation_position(x) = argmax(|dx/dt|) / (T - 1)
-```
+$$
+\text{activation\_position}(x) = \operatorname*{arg\,max}_i \lvert dx/dt \rvert \,/\, (T - 1)
+$$
 
-where `dx/dt` is approximated by the discrete first difference
-`x[i] - x[i-1]` for `i = 1, …, T-1`.
+where $dx/dt$ is approximated by the discrete first difference
+$x[i] - x[i-1]$ for $i = 1, \dots, T-1$.
 
 **Why max-slope and not peak-amplitude.** The clinical activation-time
 convention (Marchlinski / Wittkampf school) takes the steepest *slope*
@@ -170,18 +176,21 @@ event itself.
 
 **Worked example.** A simple biphasic activation:
 
-```
-x[i] = -A · sin(2π · (i - k) / w)    for k - w/2 < i ≤ k + w/2
-     = 0                              elsewhere
-```
+$$
+x[i] =
+\begin{cases}
+-A \sin\bigl(2\pi (i - k) / w\bigr) & k - w/2 < i \le k + w/2 \\
+0 & \text{elsewhere}
+\end{cases}
+$$
 
-This is one cycle of a sine, centered at sample `k`, lasting `w`
+This is one cycle of a sine, centered at sample $k$, lasting $w$
 samples. The steepest slope occurs at the zero-crossing in the middle
-of the pulse (sample `i = k`), so `activation_position = k / (T - 1)`.
+of the pulse (sample $i = k$), so $\text{activation\_position} = k / (T - 1)$.
 
-If the trace is `T = 512` samples and the activation is centered at
-sample `k = 256`, we get `activation_position ≈ 0.5`. The test fixture
-exercises this with a few `k` values.
+If the trace is $T = 512$ samples and the activation is centered at
+sample $k = 256$, we get $\text{activation\_position} \approx 0.5$. The test fixture
+exercises this with a few $k$ values.
 
 **Parameter choices.** `method` is a **required** parameter (policy
 value; no default per the math-vs-policy split in `project/architecture.md`).
@@ -242,10 +251,10 @@ above a fraction of the primary-peak amplitude.
 
 Algorithm:
 
-1. Compute the rectified signal `|x|`.
-2. Find the primary peak amplitude `A_max = max(|x|)`.
-3. Find all local maxima of `|x|` with prominence
-   `≥ threshold_frac · A_max`.
+1. Compute the rectified signal $|x|$.
+2. Find the primary peak amplitude $A_{\max} = \max(|x|)$.
+3. Find all local maxima of $|x|$ with prominence
+   $\ge \text{threshold\_frac} \cdot A_{\max}$.
 4. Subtract 1 (to exclude the primary peak itself), with a floor at 0.
 
 In code:
@@ -258,9 +267,9 @@ sec_peak_count = max(0, len(peaks) - 1)
 ```
 
 **Worked example 1 — single positive bump.** A signal with a single
-Gaussian-like positive bump has exactly one local maximum in `|x|` at
-the bump's peak. With threshold_frac=0.3, that one peak is the
-primary; nothing else clears the threshold. `sec_peak_count = 0`.
+Gaussian-like positive bump has exactly one local maximum in $|x|$ at
+the bump's peak. With `threshold_frac=0.3`, that one peak is the
+primary; nothing else clears the threshold. $\text{sec\_peak\_count} = 0$.
 
 > **Note on real biphasic EGM activations.** A *biphasic* activation
 > (positive lobe followed by negative lobe, the realistic clinical
@@ -282,8 +291,8 @@ amplitude `A/2`:
 ```
 
 With `threshold_frac = 0.3`, the secondary peak's prominence
-(`A/2 = 0.5 · A`) exceeds the threshold (`0.3 · A`), so it counts.
-`sec_peak_count = 1`.
+($A/2 = 0.5A$) exceeds the threshold ($0.3A$), so it counts.
+$\text{sec\_peak\_count} = 1$.
 
 **Parameter choices.** `threshold_frac` is a **required** parameter
 (policy value; no default per the math-vs-policy split in
@@ -319,25 +328,25 @@ and reuse it.
 **Definition.** For a discrete-time signal `x[i], i = 0..T-1` sampled at
 `fs_hz`, the **periodogram** estimate of the PSD is:
 
-```
-P̂(f_k) = (1 / (fs_hz · T)) · |DFT(x)[k]|²
-```
+$$
+\hat{P}(f_k) = \frac{1}{f_s \, T} \, \bigl\lvert \operatorname{DFT}(x)[k] \bigr\rvert^2
+$$
 
-where `f_k = k · fs_hz / T` for `k = 0, 1, …, T/2` (Nyquist-limited;
-the DFT is symmetric for real-valued `x` so we only keep the positive
-half) and `DFT(x)[k]` is the discrete Fourier transform.
+where $f_k = k \, f_s / T$ for $k = 0, 1, \dots, T/2$ (Nyquist-limited;
+the DFT is symmetric for real-valued $x$ so we only keep the positive
+half) and $\operatorname{DFT}(x)[k]$ is the discrete Fourier transform.
 
-The units of `P̂` are `(signal unit)² / Hz`. We don't care about the
+The units of $\hat{P}$ are $(\text{signal unit})^2 / \text{Hz}$. We don't care about the
 absolute scale for the three downstream features (centroid uses
 normalized weighting; entropy uses normalized probabilities; dominant
 frequency uses argmax which is scale-invariant) — so the scale factor
 out front cancels in every consumer.
 
 `scipy.signal.periodogram` returns two arrays: `f` (length `T/2 + 1`)
-and `P̂` (same length). We pass both to the consumers below.
+and the PSD $\hat{P}$ (same length). We pass both to the consumers below.
 
 **PSD reuse across features.** The three frequency features below all
-consume the same `(f, P̂)` pair. To avoid recomputing the periodogram
+consume the same $(f, \hat{P})$ pair. To avoid recomputing the periodogram
 three times per trace when running all three (the bundle.extract_all
 hot path), the public `periodogram(signal, fs_hz)` function is exposed
 as a building block, and each feature function accepts optional
@@ -366,19 +375,19 @@ egm-features would be redundant.
 
 **Definition.** The power-weighted mean frequency:
 
-```
-spectral_centroid(x) = ( Σ_k f_k · P̂(f_k) ) / ( Σ_k P̂(f_k) )
-```
+$$
+\text{spectral\_centroid}(x) = \frac{\sum_k f_k \, \hat{P}(f_k)}{\sum_k \hat{P}(f_k)}
+$$
 
 Units: Hz.
 
-**Worked example.** A pure sinusoid at frequency `f₀`. Its PSD is a
-delta at `f₀` (in the continuous limit; in the discrete periodogram,
+**Worked example.** A pure sinusoid at frequency $f_0$. Its PSD is a
+delta at $f_0$ (in the continuous limit; in the discrete periodogram,
 it's a sharp peak at the nearest bin):
 
-```
-spectral_centroid ≈ f₀
-```
+$$
+\text{spectral\_centroid} \approx f_0
+$$
 
 For a 50 Hz sine over a 512-sample window at 1 kHz, the bin closest to
 50 Hz is `k = round(50 · 512 / 1000) = 26`, so `f_26 ≈ 50.78 Hz`. The
@@ -391,14 +400,14 @@ amplitudes.** Take `x = 1.0 · sin(2π · 50 · t) + 2.0 · sin(2π · 150 · t)
 amplitude 2. The PSD has two peaks. Key point: PSD weights by *power*
 (amplitude²), not amplitude. So:
 
-- Power at 50 Hz: `∝ 1² = 1`
-- Power at 150 Hz: `∝ 2² = 4`
+- Power at 50 Hz: $\propto 1^2 = 1$
+- Power at 150 Hz: $\propto 2^2 = 4$
 
 Centroid:
 
-```
-spectral_centroid = (50 · 1 + 150 · 4) / (1 + 4) = 650 / 5 = 130 Hz
-```
+$$
+\text{spectral\_centroid} = \frac{50 \cdot 1 + 150 \cdot 4}{1 + 4} = \frac{650}{5} = 130 \text{ Hz}
+$$
 
 So the centroid sits at **130 Hz**, much closer to the 150 Hz peak
 than to 50 Hz, even though both frequencies are present. If we'd used
@@ -423,10 +432,13 @@ slow conduction → lower).
 as a probability distribution over frequency bins, divided by
 `log(N_bins)` for normalization to `[0, 1]`:
 
-```
-p_k = P̂(f_k) / Σ_j P̂(f_j)                                   # PSD as a pmf
-spectral_entropy(x) = -( Σ_k p_k · log(p_k) ) / log(N_bins)   # normalized to [0,1]
-```
+$$
+p_k = \frac{\hat{P}(f_k)}{\sum_j \hat{P}(f_j)}, \qquad
+\text{spectral\_entropy}(x) = \frac{-\sum_k p_k \log(p_k)}{\log(N_{\text{bins}})}
+$$
+
+The left expression treats the PSD as a probability mass function; the
+right normalizes the Shannon entropy to $[0, 1]$.
 
 By convention `0 · log(0) = 0`. Logarithm base is natural log (nats);
 the `log(N_bins)` divisor is in the same base so the result is
@@ -452,17 +464,16 @@ essentially all the probability lives in two bins with proportions
 `p_50 = 1/5 = 0.2` and `p_150 = 4/5 = 0.8`. Other bins have
 `p_k ≈ 0`. Entropy:
 
-```
-H = -(0.2 · ln 0.2 + 0.8 · ln 0.8) = -(0.2 · -1.609 + 0.8 · -0.223)
-  = 0.322 + 0.179 = 0.500 nats
-```
+$$
+H = -(0.2 \ln 0.2 + 0.8 \ln 0.8) = -\bigl(0.2 \cdot (-1.609) + 0.8 \cdot (-0.223)\bigr) = 0.322 + 0.179 = 0.500 \text{ nats}
+$$
 
 Normalizing by `log(N_bins)` (with `N_bins ≈ 257` for `T = 512` at
 the periodogram resolution):
 
-```
-spectral_entropy = 0.500 / log(257) ≈ 0.090
-```
+$$
+\text{spectral\_entropy} = 0.500 / \log(257) \approx 0.090
+$$
 
 That's higher than a single sinusoid (≈ 0) but much lower than white
 noise (≈ 1.0) — exactly what we'd want from an "energy concentration"
@@ -491,13 +502,13 @@ biomedical-signal use).
 
 **Definition.** The frequency at which the PSD is maximal:
 
-```
-dominant_frequency(x) = argmax_k P̂(f_k) → f_{k*}
-```
+$$
+\text{dominant\_frequency}(x) = \operatorname*{arg\,max}_k \hat{P}(f_k) \;\to\; f_{k^*}
+$$
 
 Units: Hz.
 
-**Worked example.** A pure sinusoid at `f₀ = 50 Hz` over 512 samples
+**Worked example.** A pure sinusoid at $f_0 = 50$ Hz over 512 samples
 at 1 kHz: `dominant_frequency ≈ 50.78 Hz` (the nearest bin). Test
 verifies `|dominant_frequency - 50| < 2` Hz.
 
@@ -506,9 +517,9 @@ as §2.2's multi-sinusoid example (50 Hz amplitude 1, 150 Hz amplitude
 2). The PSD has two peaks; the 150 Hz peak has 4× the power of the
 50 Hz peak. `argmax` picks the higher-power bin:
 
-```
-dominant_frequency = 150 Hz (nearest bin: ≈ 150.39 Hz)
-```
+$$
+\text{dominant\_frequency} = 150 \text{ Hz} \quad (\text{nearest bin} \approx 150.39 \text{ Hz})
+$$
 
 Two implications worth noting:
 
@@ -555,23 +566,25 @@ synthetic-signal tests that catch parameter-passing bugs.
 **Definition (Richman & Moorman 2000).** Given an embedding dimension
 `m` and a tolerance `r`, sample entropy is:
 
-```
-SampEn(x; m, r) = -log( A / B )
-```
+$$
+\mathrm{SampEn}(x; m, r) = -\log\left( \frac{A}{B} \right)
+$$
 
 where:
 
-- `B` is the number of pairs of length-`m` subsequences in `x` whose
-  Chebyshev (max-norm) distance is ≤ `r`, counted with `i ≠ j`.
-- `A` is the same count for length-`(m+1)` subsequences.
+- $B$ is the number of pairs of length-$m$ subsequences in $x$ whose
+  Chebyshev (max-norm) distance is $\le r$, counted with $i \ne j$.
+- $A$ is the same count for length-$(m+1)$ subsequences.
 
-Concretely, let `X_i^(m) = (x[i], x[i+1], …, x[i+m-1])` for
-`i = 0, …, T - m`. Then:
+Concretely, let $X_i^{(m)} = (x[i], x[i+1], \dots, x[i+m-1])$ for
+$i = 0, \dots, T - m$. Then:
 
-```
-B = | { (i, j) : i < j ≤ T-m,    max_k |X_i^(m)[k]  - X_j^(m)[k]|  ≤ r } |
-A = | { (i, j) : i < j ≤ T-m-1,  max_k |X_i^(m+1)[k] - X_j^(m+1)[k]| ≤ r } |
-```
+$$
+\begin{aligned}
+B &= \bigl| \{\, (i, j) : i < j \le T-m,\; \max_k \lvert X_i^{(m)}[k] - X_j^{(m)}[k] \rvert \le r \,\} \bigr| \\
+A &= \bigl| \{\, (i, j) : i < j \le T-m-1,\; \max_k \lvert X_i^{(m+1)}[k] - X_j^{(m+1)}[k] \rvert \le r \,\} \bigr|
+\end{aligned}
+$$
 
 Sample entropy is the negative log-probability that two `m`-length
 patterns that match continue to match when extended by one more
@@ -593,13 +606,13 @@ isn't. SampEn is the modern default.
 
 **Worked examples.**
 
-*Periodic sinusoid:* highly predictable. Any matching length-`m`
-window almost certainly matches at length `m+1` too, so `A/B ≈ 1`
-and `SampEn ≈ -log(1) = 0`. Pure sine has SampEn near 0.
+*Periodic sinusoid:* highly predictable. Any matching length-$m$
+window almost certainly matches at length $m+1$ too, so $A/B \approx 1$
+and $\mathrm{SampEn} \approx -\log(1) = 0$. Pure sine has SampEn near 0.
 
-*White Gaussian noise:* unpredictable. Length-`m` matches are rare and
-extending them rarely matches, so `A/B` is small and `SampEn` is large
-(typically ~2-3 for `m=2, r=0.2σ`).
+*White Gaussian noise:* unpredictable. Length-$m$ matches are rare and
+extending them rarely matches, so $A/B$ is small and $\mathrm{SampEn}$ is large
+(typically ~2-3 for $m=2$, $r=0.2\sigma$).
 
 **EGM interpretation.** Sample entropy measures *temporal regularity*.
 A clean periodic activation has low SampEn; fragmented atrial EGM has
@@ -620,16 +633,17 @@ Pincus 1991 (ApEn predecessor, parameter guidance still applies).
 **Definition.** Shannon entropy of the histogram of signal amplitudes,
 binned into `n_bins` equal-width bins between `min(x)` and `max(x)`:
 
-```
-Let bin_edges = linspace(min(x), max(x), n_bins + 1)
-Let c_k = count of samples in bin k                              # histogram
-Let p_k = c_k / T                                                # probabilities
-shannon_entropy(x; n_bins) = -Σ_k p_k · log(p_k)                 # nats
-```
+$$
+p_k = \frac{c_k}{T}, \qquad
+\text{shannon\_entropy}(x; n_{\text{bins}}) = -\sum_k p_k \log(p_k)
+$$
 
-By convention `0 · log(0) = 0`. We return in **nats** (natural log),
+where $c_k$ is the count of samples in bin $k$ (bin edges $=$
+`linspace(min(x), max(x), n_bins + 1)`) and $p_k$ the bin probability.
+
+By convention $0 \cdot \log(0) = 0$. We return in **nats** (natural log),
 not bits (log base 2), matching information-theory convention. Range
-is `[0, log(n_bins)]`; not normalized.
+is $[0, \log(n_{\text{bins}})]$; not normalized.
 
 **Parameter choices:**
 
@@ -641,12 +655,12 @@ is `[0, log(n_bins)]`; not normalized.
 
 **Worked examples.**
 
-*Constant signal `x[i] = c` for all i:* all samples land in one bin.
-`p_k = 1` for that bin, `p_k = 0` for all others. Entropy = 0.
+*Constant signal $x[i] = c$ for all $i$:* all samples land in one bin.
+$p_k = 1$ for that bin, $p_k = 0$ for all others. Entropy = 0.
 
 *Uniform-in-amplitude signal (random samples drawn uniformly from
-[min, max]):* `p_k ≈ 1/n_bins` for all k. Entropy = `log(n_bins)`.
-For `n_bins = 10`, that's `log(10) ≈ 2.303` nats.
+[min, max]):* $p_k \approx 1/n_{\text{bins}}$ for all $k$. Entropy = $\log(n_{\text{bins}})$.
+For `n_bins = 10`, that's $\log(10) \approx 2.303$ nats.
 
 *White Gaussian noise:* Gaussian distribution, so a few bins near the
 mean carry most probability. Entropy is between the constant and
@@ -677,9 +691,9 @@ math.
 the first step is to convert the continuous-valued signal `x` to a
 sequence of 0s and 1s. We use the **median** method:
 
-```
-b[i] = 1 if x[i] > median(x), else 0
-```
+$$
+b[i] = \begin{cases} 1 & x[i] > \operatorname{med}(x) \\ 0 & \text{otherwise} \end{cases}
+$$
 
 So `b` is a binary string of length `T`. Median is robust to baseline
 drift (zero would also work for bandpass-filtered EGMs since they're
@@ -705,11 +719,11 @@ incrementally building a dictionary. The exact procedure:
 
 **Step 3: normalize.** The raw count `c` grows with sequence length.
 Lempel & Ziv 1976 proved that for a random binary sequence,
-`c ≈ T / log_2(T)` asymptotically. So we normalize:
+$c \approx T / \log_2(T)$ asymptotically. So we normalize:
 
-```
-lempel_ziv_complexity(x) = c · log_2(T) / T
-```
+$$
+\text{lempel\_ziv\_complexity}(x) = c \cdot \frac{\log_2(T)}{T}
+$$
 
 This gives a value in roughly `(0, 1]`:
 
@@ -738,8 +752,8 @@ through LZ76:
 - `i=4`: candidate `"0101"`. Is "0101" a substring of `b[0..4] = "01010"`? **Yes** (at position 0). Extend: `w="0101"`, `i=5`.
 - ... continues, never finding new substrings. Loop ends. `c = 3`.
 
-So `lempel_ziv_complexity(alternating_sequence) ≈ 3 · log_2(T) / T → 0`
-for large `T`. The test fixture verifies this is small (< 0.1) for a
+So $\text{lempel\_ziv\_complexity}(\text{alternating}) \approx 3 \log_2(T) / T \to 0$
+for large $T$. The test fixture verifies this is small (< 0.1) for a
 signal constructed to median-binarize to exactly "01010101..." (e.g.
 sample-alternating ±1 amplitudes).
 
@@ -756,7 +770,7 @@ chunk size, not just on periodicity.
 
 *Random binary sequence:* every new short substring is novel for a
 while, so the dictionary grows fast initially. Asymptotically
-`c ≈ T / log_2(T)`, so `lempel_ziv_complexity ≈ 1`. Test fixture
+$c \approx T / \log_2(T)$, so $\text{lempel\_ziv\_complexity} \approx 1$. Test fixture
 verifies this is high (> 0.7) for `numpy.random.randint(0, 2, T)`.
 
 **Parameter choices:**
@@ -781,7 +795,7 @@ spread) — three different angles on the same intuition of "complexity."
 `complexity.py`, then call `antropy.lziv_complexity(binarized, normalize=True)`.
 antropy's `lziv_complexity` accepts a numpy array of 0/1 values directly,
 applies the LZ76 algorithm above, and (with `normalize=True`) returns the
-normalized value `c · log_2(T) / T`.
+normalized value $c \cdot \log_2(T) / T$.
 
 **Reference:** Lempel & Ziv 1976 (the original LZ complexity); Aboy 2006
 (survey of LZ applied to physiological signals, including EGM/ECG).
@@ -800,20 +814,20 @@ analysis. The procedure:
 1. For each scale `k = 1, 2, …, k_max`:
    - For each starting offset `m = 1, …, k`:
      - Construct the "downsampled" sub-series:
-       `X_k^m = (x[m], x[m+k], x[m+2k], …, x[m + ⌊(T-m)/k⌋ · k])`
+       $X_k^m = (x[m], x[m+k], x[m+2k], \dots, x[m + \lfloor (T-m)/k \rfloor \, k])$
      - Compute its **length** (sum of absolute differences between
        consecutive samples, normalized):
-       `L_m(k) = ( 1/k · Σ_{i=1}^{n_m} | x[m + ik] - x[m + (i-1)k] | ) · (T - 1) / (n_m · k)`
-       where `n_m = ⌊(T - m) / k⌋`.
-   - Average over starting offsets: `L(k) = (1/k) · Σ_m L_m(k)`.
-2. Higuchi shows that for a fractal curve, `L(k) ∝ k^{-D}` where `D`
-   is the fractal dimension. Equivalently, `log L(k) = -D · log k + const`.
-3. Fit a line to `(log k, log L(k))` for `k = 1, …, k_max`. The slope
-   is `-D`; return `D`.
+       $L_m(k) = \left( \frac{1}{k} \sum_{i=1}^{n_m} \lvert x[m + ik] - x[m + (i-1)k] \rvert \right) \frac{T - 1}{n_m \, k}$
+       where $n_m = \lfloor (T - m) / k \rfloor$.
+   - Average over starting offsets: $L(k) = \frac{1}{k} \sum_m L_m(k)$.
+2. Higuchi shows that for a fractal curve, $L(k) \propto k^{-D}$ where $D$
+   is the fractal dimension. Equivalently, $\log L(k) = -D \log k + \text{const}$.
+3. Fit a line to $(\log k, \log L(k))$ for $k = 1, \dots, k_{\max}$. The slope
+   is $-D$; return $D$.
 
-The result is dimensionless. For a 1D signal it's in `[1, 2]`:
-- `D = 1`: perfectly smooth (straight line).
-- `D = 2`: maximally rough (space-filling, white-noise-like).
+The result is dimensionless. For a 1D signal it's in $[1, 2]$:
+- $D = 1$: perfectly smooth (straight line).
+- $D = 2$: maximally rough (space-filling, white-noise-like).
 
 **Parameter choices:**
 
@@ -828,15 +842,15 @@ The result is dimensionless. For a 1D signal it's in `[1, 2]`:
 *Straight line `x[i] = a · i + b`:* should give `D = 1` (the topological
 dimension of a line). Walking through Higuchi's formula:
 
-- Each consecutive difference at scale `k` is `|x[m + ik] - x[m + (i-1)k]| = |a · k| = |a| · k`.
-- Sum over `i = 1, …, n_m`: `Σ |diff| = n_m · |a| · k`.
-- Multiply by `1/k`: `n_m · |a|`.
-- Multiply by `(T-1) / (n_m · k)`: `L_m(k) = |a| · (T-1) / k`.
-- Average over starting offsets `m`: same value, so `L(k) = |a| · (T-1) / k`.
+- Each consecutive difference at scale $k$ is $\lvert x[m + ik] - x[m + (i-1)k] \rvert = \lvert a k \rvert = \lvert a \rvert k$.
+- Sum over $i = 1, \dots, n_m$: $\sum \lvert \text{diff} \rvert = n_m \lvert a \rvert k$.
+- Multiply by $1/k$: $n_m \lvert a \rvert$.
+- Multiply by $(T-1)/(n_m k)$: $L_m(k) = \lvert a \rvert (T-1) / k$.
+- Average over starting offsets $m$: same value, so $L(k) = \lvert a \rvert (T-1) / k$.
 
-Therefore `log L(k) = log(|a|(T-1)) − log(k)`, which is a line with
-slope `-1` in the `(log k, log L(k))` plane. Higuchi defines
-`L(k) ∝ k^{-D}`, so slope `= -D`, giving **`D = 1`** for a straight
+Therefore $\log L(k) = \log(\lvert a \rvert (T-1)) - \log(k)$, which is a line with
+slope $-1$ in the $(\log k, \log L(k))$ plane. Higuchi defines
+$L(k) \propto k^{-D}$, so slope $= -D$, giving $D = 1$ for a straight
 line. ✓
 
 *White Gaussian noise:* the consecutive differences at scale `k` are
@@ -845,19 +859,19 @@ samples are themselves Gaussian with mean 0 and a constant std
 independent of `k`. The expected absolute difference is some constant
 `c`. Working through the formula:
 
-- `Σ |diff| ≈ n_m · c`.
-- Multiply by `1/k`: `n_m · c / k`.
-- Multiply by `(T-1) / (n_m · k)`: `L_m(k) ≈ c · (T-1) / k²`.
+- $\sum \lvert \text{diff} \rvert \approx n_m c$.
+- Multiply by $1/k$: $n_m c / k$.
+- Multiply by $(T-1)/(n_m k)$: $L_m(k) \approx c (T-1) / k^2$.
 
-So `log L(k) ≈ log(c · (T-1)) − 2 · log(k)`, slope `-2`, giving
-**`D = 2`** for white noise. ✓
+So $\log L(k) \approx \log(c (T-1)) - 2 \log(k)$, slope $-2$, giving
+$D = 2$ for white noise. ✓
 
-These two anchors (`D = 1` for a line, `D = 2` for white noise) are
+These two anchors ($D = 1$ for a line, $D = 2$ for white noise) are
 exactly what we'd want from a fractal-dimension measure on 1D signals.
-Real EGM traces fall somewhere between — typically `1.3 - 1.7` for a
+Real EGM traces fall somewhere between — typically $1.3$–$1.7$ for a
 clean activation, higher for fragmented traces. The test fixture
-verifies these boundaries: a perturbed line gives `D < 1.2`, white
-noise gives `D > 1.9`.
+verifies these boundaries: a perturbed line gives $D < 1.2$, white
+noise gives $D > 1.9$.
 
 **EGM interpretation.** Higuchi FD measures how "rough" or "filled" the
 signal trajectory is at fine scales. A smooth biphasic activation has
