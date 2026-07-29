@@ -22,7 +22,9 @@ repos:
         args: ["--fix=lf"]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
+    # Pinned to match the ruff install in .github/workflows/ci.yml so local +
+    # CI format identically. Bump everywhere together.
+    rev: v0.15.17
     hooks:
       - id: ruff
         args: ["--fix"]
