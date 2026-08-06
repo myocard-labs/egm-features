@@ -2,7 +2,9 @@
 
 **Repo:** egm-features · **Phase:** 1.5
 **Phase design doc:** `intracardiac-platform/phases/phase_1_5/design.md`
-**Status:** planning · **Progress:** 0/8 steps done
+**Status:** in progress · **Progress:** 1/9 steps done (S0 ✅)
+**Wave:** FEA1 is **Wave 1**, position 9 of 10 — *next* after iafdb's B22/S0 — and the Wave-1 gate
+requires this repo **tagged**, so S8 ends in a v0.2.0 release, not just a merge.
 **Repo estimate:** **9–18 h active** (Cx = **M / 3 pts**, cold-start by-analogy range — see
 [Effort tracking](#effort-tracking))
 
@@ -168,6 +170,31 @@ the §8.2 screening (B.3 requires it; D12 gives it a shortlist to check first):
 Each step is one focused commit, ends green (`ruff format` / `ruff check` / `mypy` / `pytest`), and
 states its verification. ☐ todo · 🔨 wip · ✅ done.
 
+### S0 — Clear the coordination-log inbox ✅ (est. 0.5 h)
+
+- **Change:** four one-liners the design doc asks be cleared in this session, plus CL-117 (cc'd):
+  - **CL-118** — `numpy>=1.26` → `numpy>=1.26,<2.5`, with a comment naming the reason (numpy 2.5's
+    PEP-695 stubs are unparseable at `python_version = "3.10"`) and the expiry condition.
+  - **CL-085** — pin dev tools exactly: `ruff==0.15.17`, `mypy==2.1.0` (were `>=0.6.0` / `>=1.10`;
+    egm-features was one of the last two repos still unbounded).
+  - **CL-117** — `__version__` derived from `importlib.metadata`, not the hardcoded `"0.1.1"`.
+  - **CL-099** — root-anchor the eight output-dir `.gitignore` patterns (`/data/`, `/banks/`, …).
+- **Verify:** ✅ `git check-ignore` both directions — `src/myocard_egm_features/data/x.py` and
+  `tests/data/z.py` are **not** ignored, all eight top-level output dirs still are; `__version__`
+  resolves from installed metadata; `ruff check`/`format` clean; 76 tests pass.
+- **Depends on:** none. Config only, no `src/` behaviour change → separate `[Chore]` commit.
+
+> **mypy caveat (recorded, not a failure).** A clean `pip install -e ".[dev]"` here yields **12
+> pre-existing errors** in `tests/` — 10 `type-arg` "missing type arguments for generic type
+> `ndarray`" plus two shape-assignment complaints. They reproduce identically on a **pristine HEAD
+> clone**, so S0 did not cause them, and they are the known sandbox artifact: this sandbox runs
+> **Python 3.10**, where `numpy<2.5` resolves to **2.2.6** (2.3+ dropped 3.10), whose stubs lack the
+> PEP-696 TypeVar defaults that make a bare `np.ndarray` legal. CI runs **3.12 → numpy 2.4.6**, which
+> has them — the resolve CL-118 says is clean across the other six repos. numpy 2.4.6 **cannot be
+> installed here at all** ("No matching distribution"), so this is unverifiable in-sandbox by
+> construction; **CI is the authority**, and I'll read the lint/type job on push rather than claim
+> local mypy cleanliness.
+
 ### S1 — `docs/theory.md` §4: catch22 ☐ (est. 2–4 h)
 
 - **Change:** New §4 covering all 22 catch22 features plus the catch24 pair, organised by the eight
@@ -269,7 +296,12 @@ states its verification. ☐ todo · 🔨 wip · ✅ done.
 
 ## Effort tracking
 
-> Method: `intracardiac-platform/project/investigations/estimate_vs_actual_tracking.md`.
+> **⚠ Effort tracking is SKIPPED for Phase 1.5** (Daniel, 2026-07-29 — design §6): no §6 roll-up, no
+> `Actual`/`Elapsed`, nothing appended to `estimation_ledger.csv`; the ledger stays cold. Repos keep
+> *rough* estimates in their own plans, which is all the per-step figures below are. The session log
+> and the by-issue table are left in place but **not maintained this phase**. Original method, for
+> when it's readopted:
+> `intracardiac-platform/project/investigations/estimate_vs_actual_tracking.md`.
 > Daniel speaks the markers (`start` / `switch` / `break` / `resume` / `stop`); this chat stamps the
 > time from `date`. **Active = marked span − breaks.** Backstop: unmarked silence > **2 h** = away.
 > Rolls up at cleanup into design §6 / §11 and `estimation_ledger.csv`.

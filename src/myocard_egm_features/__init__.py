@@ -23,7 +23,18 @@ choices it carries.
 
 from __future__ import annotations
 
-__version__ = "0.1.1"
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _dist_version
+
+# Single-sourced from pyproject.toml's [project] version so the two can never
+# drift. A hardcoded constant here has silently gone stale in sibling repos and
+# been stamped into on-disk artifacts as provenance — a believed-but-wrong
+# version is worse than none. The fallback covers running from a source tree
+# with no installed distribution metadata.
+try:
+    __version__ = _dist_version("myocard-egm-features")
+except PackageNotFoundError:  # pragma: no cover - source tree without install
+    __version__ = "0.0.0.dev0"
 
 __all__ = [
     "__version__",

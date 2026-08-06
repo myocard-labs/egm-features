@@ -51,18 +51,29 @@ classifiers = [
 ]
 
 dependencies = [
-  "numpy>=1.26",
+  # numpy is capped below 2.5 as a deliberate, temporary exception to the
+  # "floors only, never cap runtime deps" convention: numpy 2.5's type stubs
+  # use PEP-695 `type` statements, which mypy refuses to parse under this
+  # project's `python_version = "3.10"`, so an unconstrained resolve breaks
+  # the type-check job on code that never changed. The cap is about stub
+  # parseability, not runtime behaviour, and EXPIRES once the Python floor
+  # moves past 3.11. Matches the rest of the fleet.
+  "numpy>=1.26,<2.5",
   "scipy>=1.11",
   "pandas>=2.0",
   "antropy>=0.1.6",
 ]
 
 [project.optional-dependencies]
+# Dev tooling is pinned EXACTLY (not floored) so contributors, pre-commit, and
+# CI all run the same versions — a floor let CI resolve a newer ruff than
+# pre-commit and turned the lint job red on untouched files. Keep ruff in step
+# with .pre-commit-config.yaml and .github/workflows/ci.yml.
 dev = [
   "pytest>=8.0",
   "pytest-cov>=5.0",
-  "ruff>=0.6.0",
-  "mypy>=1.10",
+  "ruff==0.15.17",
+  "mypy==2.1.0",
   "pre-commit>=3.7",
   "nbstripout>=0.7",
 ]
