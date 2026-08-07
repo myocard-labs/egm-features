@@ -1,68 +1,38 @@
 # egm-features — roadmap
 
-What's planned for future releases. Internal doc — public users see
-the README and `docs/usage.md`. Items scheduled into cross-cutting
-Phase work in the meta repo's `project_plan.md` carry a
-`→ tracked at intracardiac-platform Phase X` annotation; the rest are
-component-internal — driven by what consumers actually need.
+Future work only — shipped history lives in [`CHANGELOG.md`](../CHANGELOG.md). Internal
+doc; public users read the README + `docs/usage.md`.
 
-## v0.1.0 — current release (target for Block 5)
+Work lands here as it's identified, sits in the **Backlog** until a phase-planning session
+promotes it into a **Phase** cluster, then moves to the CHANGELOG once shipped. Phase
+clusters mirror the science Project Phases in
+`intracardiac-platform/project/project_plan.md` and stay living lists until each phase's
+planning session finalizes them. Items scheduled into cross-cutting Phase work carry a
+`→ tracked at intracardiac-platform Phase X` annotation; the rest are component-internal.
 
-Scope (recap; see `project/architecture.md` for the design rationale):
+## Phase 1.5 — sim-realism
 
-- **Three feature modules** with 11 functions total:
-  - `time_domain.py` — `peak_to_peak`, `zero_crossings`,
-    `activation_position` (dV/dt method), `sec_peak_count`.
-  - `frequency.py` — `spectral_centroid`, `spectral_entropy`,
-    `dominant_frequency`; shared `_periodogram` helper.
-  - `complexity.py` — `sample_entropy`, `shannon_entropy`,
-    `lempel_ziv_complexity` (LZ76 with median binarization),
-    `higuchi_fractal_dimension`.
-- **Bundle helper** — `bundle.extract_all(signals, fs_hz)` returns a
-  pandas DataFrame with N rows + 11 columns; per-module
-  `extract_time_domain` / `extract_frequency` / `extract_complexity`
-  helpers for partial bundles.
-- **Tests** — synthetic-signal anchors per the worked examples in
-  `docs/theory.md` (pure sine, white noise, biphasic pulse, periodic
-  binary, etc.).
-- **Theory doc** — `docs/theory.md` covering math + parameter
-  rationale for every feature. Written *before* the implementation per
-  [[feedback-theory-first-for-unfamiliar-domains]].
+**This repo's assigned Phase 1.5 scope is one item: FEA1** — the catch22 feature functions
+plus the shared feature-set registry. It is *active*, so it lives in
+[`phase_1_5_plan.md`](phase_1_5_plan.md) (steps, estimate, design decisions), not here —
+this roadmap stays future-only. FEA1 lands in `CHANGELOG.md` when it ships and the plan is
+deleted at phase cleanup.
 
-Dependencies (lean): `numpy>=1.26, scipy>=1.11, pandas>=2.0, antropy>=0.1.6`.
-No torch, no h5py, no internal myocard- deps.
+Nothing else in this repo is scheduled for Phase 1.5. The two items below were previously
+filed here as Phase 1.5 work; the phase design doc's §4 pass reclassified both as
+**watch-triggers** — deferred, pulled in only if the named trigger fires.
 
-## v0.2.0+ — concrete next steps
+### Watch-triggered — not scheduled
 
-These are sized for "could land in one focused PR each." Order is
-suggestive; pick by what unblocks the next consumer need.
+> Per `intracardiac-platform/phases/phase_1_5/design.md` §4 ("Deferred — stay in each repo's
+> `roadmap.md`; revisit only on trigger"). Neither is planned work; each is a standing
+> response to a specific observation.
 
-### Typed-contract bundle output (`egm_features_bank` Pydantic model)
+#### `activation_position` upgrade — Wittkampf-smoothed dV/dt
 
-The v0.1.0 `bundle.extract_all` returns a pandas DataFrame.
-egm-contracts has an `egm_features_bank` schema roadmapped (see
-egm-contracts `project/roadmap.md` v0.5.0+). When that schema ships,
-add a parallel API:
-
-```python
-def extract_all_typed(signals, fs_hz) -> FeaturesBank: ...
-```
-
-where `FeaturesBank` is the codegen'd Pydantic model from
-egm-contracts. Keeps the existing DataFrame API for notebook
-ergonomics; the typed API is for HDF5 round-trip via egm-data and
-for any consumer that wants schema-validated output.
-
-> → Tracked at `intracardiac-platform/project/refactor_checklist.md`
-> Step 4 follow-up; depends on the egm-contracts schema landing first.
-> Cascade order: contracts → data → features.
-
-### `activation_position` upgrade — Wittkampf-smoothed dV/dt
-
-`docs/theory.md` §1.3 Limitations notes that the discrete
-first-difference algorithm is noise-sensitive within the 30–250 Hz
-pass band. The cheapest upgrade is to low-pass at ~200 Hz before
-taking the difference (the Wittkampf-smoothed convention). Adds a
+`docs/theory.md` §1.3 Limitations notes that the discrete first-difference algorithm is
+noise-sensitive within the 30–250 Hz pass band. The cheapest upgrade is to low-pass at
+~200 Hz before taking the difference (the Wittkampf-smoothed convention). Adds a
 parameter:
 
 ```python
@@ -76,125 +46,183 @@ def activation_position(
 
 with `method="dvdt_raw"` reserved for the v0.1.0 behavior.
 
-> → Tracked at `intracardiac-platform/project/project_plan.md` Phase 1.5
-> (sim-realism comparison work). Trigger: if the sim-realism feature
-> distribution comparison shows excessive `activation_position`
-> variance on IAFDB, that's the signal we need the smoothed variant.
+> **Trigger:** the STU5 sim↔IAFDB feature-distribution comparison shows excessive
+> `activation_position` variance on IAFDB. Until then, not planned work.
+> Listed in design §4's deferred watch-trigger set.
 
-### Additional features (driven by Phase 1.5 needs)
+#### Additional features (if the comparison surfaces a gap)
 
-The v1_baseline 11 is the starting set. As the sim-realism work
-proceeds we may want more — the synthetic-vs-IAFDB distribution
-comparison may surface specific phenomena that none of the 11 capture.
-Plausible additions:
+The v1_baseline 11 plus the FEA1 catch22 set is the working comparison space. If the
+synthetic-vs-IAFDB comparison surfaces a phenomenon none of them capture, plausible
+additions are: **wavelet-based** energy ratios across scales; **Hilbert-envelope** features
+(peak amplitude, envelope decay rate); **activation-template correlation** (match each trace
+against a known clean-activation template — correlation height + position). Each follows the
+theory-first rule: add to `docs/theory.md` first (math + worked example + parameter
+rationale), then implement.
 
-- **Wavelet-based features.** Energy ratios across wavelet
-  scales — captures multi-scale structure that PSD averages away.
-- **Hilbert envelope features.** Instantaneous-amplitude envelope
-  features — peak amplitude, envelope decay rate.
-- **Activation-template correlation.** Match each trace against a
-  known clean-activation template; correlation height + position is
-  a feature.
+> **Trigger:** STU5 / the §8.2 feature-responsiveness screening identifies a phenomenon the
+> current feature set misses. Note catch22 (FEA1) already widens the space considerably —
+> autocorrelation timescales, symbolic dynamics, forecasting error, extreme-event timing —
+> so this is a smaller gap than it was when first written.
 
-Each addition follows the theory-first rule: add to `docs/theory.md`
-first with the math + worked example + parameter rationale, then
-implement.
+## Backlog (unscheduled — promoted into a phase at a planning session)
 
-> → Tracked at `intracardiac-platform/project/project_plan.md` Phase 1.5
-> (additional Phase 1.5 work surfaces specific needs).
+### Typed-contract bundle output (`egm_features_bank` Pydantic model)
 
-### Performance optimization (if needed)
+`bundle.extract_all` returns a pandas DataFrame today. egm-contracts has an
+`egm_features_bank` schema roadmapped; when it ships, add a parallel API:
 
-`sample_entropy` is O(T²) in the trace length T. For T=512 the
-absolute cost is small (~ms per trace); for an N=10000 trace bank
-it's ~5–10 seconds total. Not currently a bottleneck.
+```python
+def extract_all_typed(signals, fs_hz) -> FeaturesBank: ...
+```
 
-`higuchi_fractal_dimension` is O(k_max · T) — also fine at our
-scale.
+where `FeaturesBank` is the codegen'd Pydantic model from egm-contracts. Keep the
+DataFrame API for notebook ergonomics; the typed API is for HDF5 round-trip via egm-data
+and any consumer that wants schema-validated output.
 
-If a future Phase 4 / Phase 7 (longer traces, larger banks) makes
-extraction slow enough to be a real friction in iteration loops,
-options:
+> → Depends on the egm-contracts schema landing first; cascade order
+> contracts → data → features. See `egm-contracts/project/roadmap.md` "Schema bumps to
+> coordinate" and `intracardiac-platform/project/refactor_checklist.md` Step 4 follow-up.
+>
+> **Confirmed out of Phase 1.5** (2026-07-28): `egm_features_bank` is not in the phase's
+> Wave-1 contract bump (design §5), so the prerequisite doesn't land this phase. v0.2.0
+> shipped the catch22 set instead, so this work lands in a later version —
+> `project/architecture.md`'s "at v0.2.0" note was corrected accordingly at FEA1's S8.
 
-- `numba` JIT for the inner loops of the wrappers we wrote ourselves
-  (`shannon_entropy`).
-- `joblib` parallel iteration in `bundle.extract_all` (currently a
-  serial loop).
-- C-accelerated antropy variants if they ship.
+### Performance optimization (if extraction becomes a friction)
 
-Not on the v0.2.0 critical path — wait for evidence of friction.
+**Measured at FEA1's S7** (N=1000 EGM-like traces, T=192, 1 kHz): the native eleven cost
+**0.91 ms/trace** — 9.1 s for a 10,000-trace bank — and all 33 features cost 1.50 ms/trace
+(15.0 s). Per feature: `shannon_entropy` 0.34 ms, the shared periodogram 0.14 ms,
+`sample_entropy` 0.10 ms, `lempel_ziv_complexity` 0.06 ms, the other seven under 0.03 ms.
 
-> → Component-internal. No phase home until friction shows up.
+> **This entry previously asserted `sample_entropy` was the bottleneck.** That was inherited
+> from v0.1.0 and is **wrong at T = 192**, where it is 14% of the cost and `shannon_entropy`
+> is 3.5× more expensive. The original claim holds at T = 512, where the `O(T²)` term takes
+> over — so the ordering will swing back at longer trace lengths, and the profile should be
+> re-measured rather than assumed whenever `T` changes. `docs/usage.md` carries the same
+> correction.
 
-### Cross-project code placement audit candidates
+Nothing here is currently friction: **selection is the lever that already exists**, and a
+three-feature study set costs 0.06 ms/trace, a fifteenth of the default. If a future Phase 4 / 7
+(longer traces, larger banks) makes extraction genuinely slow: `numba` JIT for our hand-written
+inner loops, `joblib` parallel iteration in `bundle` (currently a serial loop), or C-accelerated
+antropy variants if they ship. Wait for evidence of friction.
 
-None identified for v0.1.0. The egm-features library is freshly built
-specifically for this scope; no drift to clean up.
+> → Component-internal; no phase home until friction shows up. Also named in design §4's
+> deferred watch-trigger set ("feature/studio perf accel"), so the phase agrees: evidence
+> first. **S7's measurement is that evidence, and it does not trip the trigger.**
 
-Adjacent question for the **Refactor Step 8 code-placement audit**:
-is there any code in `egm-classifier`'s standalone diagnostic
-notebooks (from v1_baseline) that should move here? The chat-based
-feature analysis from the v1_baseline diagnostic was the source
-material for this library, but the *plotting + comparison code* that
-went around it lived in the diagnostic chat itself. If any of that
-plotting code survives somewhere recoverable, it might belong in
-egm-studio (per [Consumer responsibilities](architecture.md#consumer-responsibilities))
-rather than here.
+### Verify the catch22 extra installs on Windows and macOS
 
-> → Tracked at `intracardiac-platform/project/refactor_checklist.md`
-> Step 8 (cross-project code-placement audit).
+**Everything we know about installing `pycatch22` is Linux.** The CI matrix is
+`ubuntu-latest`, Daniel develops on Ubuntu, and the project-lead's clean-box build was
+Linux. `pycatch22` publishes **no wheels**, so every install compiles from source — and
+the toolchain story is very different off Linux:
 
-## Schema bumps to coordinate — see egm-contracts roadmap
+| platform | what a source build needs | how big an ask |
+|---|---|---|
+| Linux | `build-essential` | one `apt install`, usually already present |
+| macOS | Xcode Command Line Tools | one command, a few GB, generally allowed |
+| **Windows** | **MSVC Build Tools** | multi-GB installer, and **frequently blocked on managed university machines** |
 
-egm-features doesn't ship a schema today (the DataFrame bundle output
-is informal). When the typed-contract bundle output lands (above), the
-schema-cascade story applies in the usual order
-(egm-contracts → egm-data → egm-features). Cross-reference at
-`egm-contracts/project/roadmap.md` "Schema bumps to coordinate."
+**Windows is the one that matters.** The external audience for this library is academic
+EP researchers, and a large share of them are on institutional Windows laptops where
+installing a C compiler needs IT approval they will not pursue for one dependency. If
+`pip install "myocard-egm-features[catch22]"` fails there, the practical outcome is that
+catch22 is unavailable to the people most likely to want it.
+
+**What to actually do:**
+
+1. **Measure before designing.** Try a clean `pip install "myocard-egm-features[catch22]"`
+   on Windows and macOS — both a base install and the extra — and record what breaks and
+   what the failure text looks like. It may simply work; `pycatch22`'s sdist is small and
+   ANSI C, and MSVC may handle it unmodified.
+2. **If Windows fails**, options in rough order of preference:
+   - **Upstream.** Ask whether `pycatch22` would publish wheels (`cibuildwheel` makes this
+     routine). Best outcome for everyone and costs us nothing but a request.
+   - **conda-forge.** Check whether a built `pycatch22` package exists there; conda is
+     common in academic environments precisely because it avoids compiler requirements.
+   - **Document the limitation honestly** and let Windows users run the native eleven,
+     which need no toolchain and are the clinically-grounded half anyway.
+   - **A pure-Python fallback provider** is the seam's whole point (D2's second hedge) —
+     but note the tension with D1: we chose to wrap the reference implementation
+     *specifically* to avoid a silent correctness risk in the feature set whose job is
+     detecting sim-vs-real differences. A reimplementation reintroduces exactly that risk,
+     so it is the last resort, not the first.
+3. **Fix the platform-specific error text either way.** `CATCH22_EXTRA_HINT` currently says
+   "build-essential on Debian/Ubuntu", which is unhelpful-to-misleading on Windows and
+   macOS. Whatever the install verdict, the message should name the right prerequisite for
+   the platform it is printed on.
+
+> → Component-internal, but gated by a project-level decision: PyPI publishing is deferred
+> to first-paper time (`intracardiac-platform` — publishing timing), and D2 deferred the
+> non-Linux question to post-Phase-2 on the grounds that "publishing to toolchain-less
+> machines is the only place it would bite." **That is precisely the moment this becomes
+> real.** Trigger: before any external release, or sooner if a collaborator on Windows or
+> macOS needs the catch22 features.
+
+### Warn when a trace is too short to feature-extract meaningfully
+
+Nothing currently detects an absurdly short trace. `pycatch22` returns *numbers* for a
+5-sample input — not `NaN`, not an error — and several native features degrade quietly
+too. A caller who accidentally feeds a truncated or empty-ish window gets plausible
+values and no signal that they are meaningless.
+
+Proposal: a **coarse absurdity guard** in the extraction path — warn once per batch when
+traces fall below some clearly-indefensible length (a few dozen samples), in the same
+aggregated style as the `NaN` warning.
+
+> **Deliberately coarse.** The tempting version is a per-feature `min_length`, but we have
+> no defensible numbers: `dfa` does not work at 192 samples and fail at 191, it degrades
+> continuously, and `docs/theory.md` §4.1.3's reliability read is a judgement rather than a
+> threshold. Per-feature minimums would manufacture precision the literature does not give
+> us and would look authoritative while being invented. A guard that only catches the
+> obviously-broken case is honest and still closes the real gap.
+>
+> → Component-internal. Trigger: someone gets confused by values from a short trace, or a
+> consumer asks for the check. Related: §4.1.3 documents *which* features want longer
+> windows, which is the knowledge a consumer needs to choose — this item is only about
+> catching accidents.
+
+### Open API questions
+
+Worth thinking about as the next consumer arrives; none need a decision yet:
+
+- Exposing the per-module helpers (`extract_time_domain`, etc.) at the top-level
+  `__init__.py` vs. under `bundle.` — lower call-site verbosity vs. more namespace surface.
+- A shared `FsAware` Protocol with egm-signal for the `fs_hz`-dependent functions —
+  unifies the signature but adds a cross-repo dependency for marginal benefit.
+- A typed `FeatureResult` dataclass carrying units (Hz / mV / dimensionless) + confidence
+  intervals instead of bare floats — speculative until a consumer needs the metadata.
+
+> **Answered, in progress:** the `features=[...]` selection parameter on `extract_all` was
+> the first question on this list. FEA1 answers it — a feature-set registry spanning the 11
+> and the catch22 set, with named presets and a `features=` selector (plan S5–S6). Removed
+> from the open list; it moves to `CHANGELOG.md` when it ships.
+
+## Known issues
+
+None open. (`activation_position`'s dV/dt noise sensitivity in the 30–250 Hz band is a
+known *limitation*, not a bug — the Wittkampf-smoothing upgrade above would address it, but
+that upgrade is **watch-triggered, not scheduled**: it lands only if the STU5 comparison
+shows the variance actually bites.)
 
 ## Won't-do (out of scope, but documented to save the question)
 
-- **No HDF5 / CSV / JSON I/O inside this repo.** Bank reading is
-  egm-data's job. The bundle returns a pandas DataFrame; the caller
-  decides what to do with it.
-- **No DSP primitives inside this repo.** Bandpass, calibration,
-  resampling all live in `myocard-egm-signal`. egm-features operates
-  on already-bandpassed, already-calibrated numpy arrays.
-- **No torch dependency.** No model code, no nn.Module. Stays at the
-  numpy + scipy + pandas + antropy level.
-- **No CLI.** Library only — drive it from notebooks, from
-  egm-studio's `egm-figures` recipes, or from
-  synthetic-egm-pipeline's tuning loops. See
+- **No HDF5 / CSV / JSON I/O inside this repo.** Bank reading is egm-data's job; the bundle
+  returns a pandas DataFrame and the caller decides what to do with it.
+- **No DSP primitives.** Bandpass, calibration, resampling all live in
+  `myocard-egm-signal`; egm-features operates on already-bandpassed, already-calibrated
+  numpy arrays.
+- **No torch dependency.** No model code, no `nn.Module` — stays at the numpy + scipy +
+  pandas + antropy level.
+- **No CLI.** Library only — drive it from notebooks, egm-studio's `egm-studio-render`
+  recipes, or synthetic-egm-pipeline's tuning loops. See
   [Consumer responsibilities](architecture.md#consumer-responsibilities).
-- **No bank-aware aggregation.** Group-by / median-per-patient /
-  distribution-difference statistics are not in scope — those are
-  caller responsibilities (pandas + scipy.stats handle them well in
-  notebook code; egm-studio recipes will wrap them for paper figures).
-- **No multi-trace features** (cross-pair correlation, spatial
-  fragmentation indices). Per-trace only. Multi-pair features would
-  need an entirely different shape contract; defer until a real
-  consumer asks.
-
-## Open architectural questions for later
-
-These don't need decisions for v0.1.0 but are worth thinking about as
-the next consumer arrives:
-
-- **Should `bundle.extract_all` grow a `features=[...]` selection
-  parameter** to compute only a subset? Today it computes all 11.
-  Useful for performance-sensitive callers that only need a few
-  features. Decide when a consumer asks.
-- **Should the per-module bundle helpers
-  (`extract_time_domain`, etc.) be exposed in the top-level
-  `__init__.py`** as `extract_time_domain` rather than
-  `bundle.extract_time_domain`? Lower call-site verbosity but more
-  surface area in the top-level namespace.
-- **Should features that need `fs_hz` (frequency-domain ones) share a
-  `FsAware` Protocol** with egm-signal's similar dependency? Currently
-  each function takes `fs_hz` as a positional arg. A shared Protocol
-  would unify the type signature but adds a cross-repo dependency for
-  marginal benefit.
-- **Should we add a typed `FeatureResult` dataclass** instead of
-  returning bare floats? Would carry units (Hz vs mV vs dimensionless)
-  and confidence intervals where applicable. Speculative until a
-  consumer needs the metadata.
+- **No bank-aware aggregation.** Group-by / median-per-patient / distribution-difference
+  statistics are caller responsibilities (pandas + scipy.stats handle them well in
+  notebook code; egm-studio recipes wrap them for paper figures).
+- **No multi-trace features** (cross-pair correlation, spatial fragmentation indices).
+  Per-trace only — multi-pair features need an entirely different shape contract; defer
+  until a real consumer asks.

@@ -48,7 +48,7 @@ shape, API choices, consumer responsibilities.
   an `(N, T)` numpy array but doesn't load it; the caller does that
   via egm-data).
 - Render plots (`egm-studio` does that — both the GUI features view
-  and the `egm-figures` CLI recipes).
+  and the `egm-studio-render` CLI recipes).
 - Run analysis workflows like "compare feature distributions across
   synthetic + IAFDB banks" (see [Consumer responsibilities](#consumer-responsibilities)
   below).
@@ -71,12 +71,30 @@ src/myocard_egm_features/
 │                        dominant_frequency (+ shared periodogram helper)
 ├── complexity.py      ← sample_entropy, shannon_entropy,
 │                        lempel_ziv_complexity, higuchi_fractal_dimension
-└── bundle.py          ← extract_all + per-module extract_<module> helpers
+├── catch22.py         ← the catch22 set + the optional-dependency gate
+├── providers.py       ← the FeatureProvider seam + policy constants
+├── sets.py            ← the feature-set registry (pure metadata)
+└── bundle.py          ← extract_all / extract_catch22 + per-module helpers
 ```
 
-Four files, no subpackages, no `_helpers/` directory. The features
-within each module are independent of each other; future growth means
-new functions added to existing files, not a deeper hierarchy.
+No subpackages, no `_helpers/` directory. The features within each of
+the four feature modules are independent of each other; growth there
+means new functions in existing files, not a deeper hierarchy.
+
+The three later modules are not feature math at all — they are the
+machinery that lets a caller name a set of features and get exactly
+those. Their dependency order is strictly one-way, and deliberately so:
+
+```
+catch22 ──▶ providers ──▶ sets ──▶ bundle
+                └────────────────────┘
+```
+
+`catch22` imports nothing from the package. `providers` imports the
+four feature modules and `catch22`. `sets` imports `providers`.
+`bundle` imports `sets` and re-exports `providers`' constants. Nothing
+imports backwards — which is why the policy constants had to move (see
+below).
 
 If a future feature spans modules (e.g., a "complexity feature based
 on the dominant frequency"), it goes in whichever module's `import`
@@ -155,6 +173,55 @@ Same reasoning as why this repo wraps the trivial numpy features
 above. The wrappers are the project's *policy* layer on top of the
 canonical algorithm implementations.
 
+### Why catch22 does NOT get per-feature wrappers
+
+The argument above is about **parameter policy** — `sample_entropy`'s
+`m` and `r` are ours to choose, and pinning them in one place is what
+stops two consumers computing differently-parameterised features under
+one column name.
+
+**catch22 has no parameters to pin.** Its constants are part of each
+feature's definition: the "5" in `mode_5` is its bin count, the "40" in
+`ami_timescale` its lag cap. Exposing them would let a caller compute
+something that is no longer the published statistic, so none of the
+catch22 functions take parameters at all.
+
+With no policy to encode, 24 per-feature wrappers would carry nothing
+but symmetry — 24 more public names, and 24 docstrings duplicating
+`docs/theory.md` §4. So the catch22 surface is three narrowing entry
+points instead: `catch22_all` (everything), `catch22_features` (a named
+subset), `catch22_feature` (one). Selection by name covers the ground a
+named function would.
+
+This is a deliberate asymmetry with §1–§3, recorded here so it is not
+"fixed" later by someone restoring consistency without knowing what the
+original pattern was for.
+
+### Why key off the hctsa code rather than pycatch22's short names
+
+Every catch22 feature has an `hctsa` code (`CO_trev_1_num`) and a short
+name (`trev`). We use short names as column labels but resolve them
+from the **codes**, keeping our own mapping.
+
+Not because upstream's short names are wrong — they are correct, and we
+agree with them on 22 of 24. Three narrower reasons:
+
+1. **Two names we choose differently.** `SB_TransitionMatrix_3ac_sumdiagcov`
+   is `transition_variance` here rather than upstream's
+   `transition_matrix`, because the feature is the summed column
+   variance *of* that matrix, not the matrix. And `DN_Spread_Std` is
+   `std_dev` rather than `SD`.
+2. **Documentation order.** `pycatch22` returns features in a different
+   order than `docs/theory.md` §4 presents them, and a DataFrame should
+   read the way the theory doc reads.
+3. **A stable key.** An hctsa code changes only when the feature does,
+   whereas a convenience label could be renamed upstream and silently
+   re-point one of our columns at a different statistic.
+
+A test asserts every code `pycatch22` returns is one we map, so an
+upstream feature-set change fails loudly rather than narrowing the
+comparison space in silence.
+
 ### Defaults policy — math constants vs project-policy values
 
 The "wrappers are the policy layer" argument above runs into
@@ -173,6 +240,7 @@ automatically).
 | `sec_peak_count.threshold_frac` | policy (clinical convention varies 30–50%) | required |
 | `lempel_ziv_complexity.binarize_method` | policy (project choice between `"median"`/`"zero"`) | required |
 | `activation_position.method` | policy (project choice between `"dvdt_max"`/`"abs_peak"`) | required |
+| *every catch22 feature* | **neither** — the constants are part of the published definition | no parameter exposed |
 
 Direct callers of the individual extractors must pass the policy
 parameters explicitly. `bundle.extract_all` hardcodes the project's
@@ -189,9 +257,55 @@ Consumers calling individual extractors are forced to think about
 which policy they want — which prevents accidental drift across the
 codebase.
 
-Recording these standard values: they live in `bundle.py` as plain
-constants, with cross-references to the `docs/theory.md` sections
-that justify them.
+Recording these standard values: they live in **`providers.py`** as
+plain constants, with cross-references to the `docs/theory.md` sections
+that justify them, and `bundle` re-exports them under their original
+names so `bundle.ACTIVATION_METHOD` remains public API.
+
+> They lived in `bundle.py` until v0.2.0. They had to move because
+> `bundle` now imports the feature-set registry, and the registry
+> imports the providers that *apply* these constants — leaving them in
+> `bundle` would have made `bundle → sets → providers → bundle` a
+> cycle. Putting them next to the code that applies them is also the
+> more honest arrangement.
+
+### The provider seam, and why the registry stops where it does
+
+Two kinds of feature now ship, and they differ in ways a caller should
+not have to care about: the native eleven are always installed and
+carry policy arguments; the catch22 twenty-four delegate to an optional
+C extension that may be absent. Without a seam, every consumer wanting
+"these eight features" would have to know which camp each name is in,
+whether the optional dependency is present, and which policy arguments
+to pass.
+
+`providers.FeatureProvider` is that seam — `name`, `feature_names`,
+`available()`, `extract()`. Two implementations, and the day a
+toolchain-less target makes `pycatch22` unusable, the fix is one new
+provider class rather than a change at every call site.
+
+**Selection is a performance contract, and each provider honours it
+differently.** `extract(..., features=...)` means "do not make the
+caller pay for what it did not ask for" — but the cheapest way to
+achieve that depends on the implementation. The native features are
+independent calls, so the provider skips what was not requested and
+computes the shared periodogram only if a spectral feature is wanted.
+catch22 exposes both a bundled entry point and per-feature ones, and
+the bundle carries no discount — it is a loop over the same functions —
+so that provider calls exactly the individual functions requested.
+Concentrating that decision behind one signature is what keeps the
+registry free of per-provider branching.
+
+**`sets.py` is pure metadata, and stops at name → provider.** It
+answers what exists, who computes it, and what the named groupings are.
+It does not orchestrate extraction — `bundle` does — and it ships **no
+study-specific curation**. A set like "the catch22 features that behave
+at T = 192" encodes a judgement true for one analysis and false for the
+next; this library has no way to know which situation a consumer is in,
+and libraries here ship no policy defaults. The reliability *knowledge*
+lives in `docs/theory.md` §4.1.3; the *decision* belongs to the
+consumer's config. A test pins the shipped set list so adding a
+convenience set fails the build.
 
 ### Why per-trace shape (not polymorphic over `(T,)` and `(N, T)`)
 
@@ -217,8 +331,12 @@ read; standard tooling for downstream filtering and plotting.
 `egm_features_bank` schema. When that schema lands, `bundle` grows a
 parallel API that returns a typed Pydantic model. The pandas DataFrame
 API stays for notebook ergonomics; the typed-bank API is for HDF5
-round-trip via egm-data. Decision deferred to v0.2.0 of egm-features
-to avoid bundling two design questions in one release.
+round-trip via egm-data.
+
+> This was once pencilled in "at v0.2.0". v0.2.0 shipped the catch22
+> set instead, and the `egm_features_bank` schema is not in Phase 1.5's
+> contract bump — so the work simply lands in a later version. See
+> `roadmap.md`.
 
 ### Why no CLI
 
@@ -230,7 +348,7 @@ The "what's a typical command-line invocation of feature extraction"
 question is answered by the consumer:
 
 - For a paper-figure-quality cross-bank comparison, run
-  `egm-figures sim-realism-comparison` (egm-studio CLI; lands in
+  `egm-studio-render <sim-realism-comparison-spec>.json` (egm-studio CLI,
   Refactor Step 6).
 - For an ad-hoc tuning loop during synthetic v2, run a notebook or a
   small driver script that imports egm-features.
@@ -238,7 +356,7 @@ question is answered by the consumer:
   HDF5, that would be a synthetic-egm-pipeline or egm-data CLI; not
   in scope for egm-features.
 
-### Why these 11 features specifically
+### Why these 11 native features specifically
 
 Source: the v1_baseline diagnostic (intracardiac-platform/project/v1_baseline_investigation.md)
 plus Sánchez 2021's seven features. The 11 are:
@@ -259,7 +377,27 @@ renamed it.
 
 **Future feature additions** go through a design pass before landing:
 each new feature needs a theory.md section before its implementation
-ships, per [[feedback-theory-first-for-unfamiliar-domains]].
+ships, per [[feedback-theory-first-for-unfamiliar-domains]]. That rule
+was followed for the catch22 set: `docs/theory.md` §4 landed, with a
+worked numeric anchor per feature, before any of the code.
+
+### And why catch22 alongside them
+
+The eleven were chosen because a paper or a cardiologist named them.
+catch22 was chosen **statistically** — ~4800 `hctsa` candidates filtered
+to 22 that perform well across many classification tasks while staying
+minimally redundant with each other.
+
+They are complementary rather than competing, and the reason is
+concrete: **catch22 is computed on the z-scored trace**, so it cannot
+see amplitude at all — and bipolar peak-to-peak voltage, the `< 0.5 mV`
+scar threshold, is the single most established substrate marker in the
+clinical literature. catch22 contributes morphology and dynamics axes
+the eleven have no equivalent for (autocorrelation timescales, symbolic
+dynamics, forecasting error, extreme-event timing, time-reversibility);
+the eleven contribute the amplitude and activation axes catch22
+deliberately discards. Shipping both is the point; `docs/theory.md`
+§4.1.1 has the argument in full.
 
 ## Consumer responsibilities
 
@@ -270,7 +408,7 @@ elsewhere.
 
 | Workflow | Lives in | Pattern |
 |---|---|---|
-| Paper-quality figures comparing synthetic vs IAFDB feature distributions | **`egm-studio`** `figures/recipes/sim_realism_comparison.py` (lands in Refactor Step 6) | Recipe-driven, reproducible, journal-quality output via `egm-figures` CLI |
+| Paper-quality figures comparing synthetic vs IAFDB feature distributions | **`egm-studio`** `figures/recipes/sim_realism_comparison.py` (lands in Refactor Step 6) | Recipe-driven, reproducible, journal-quality output via `egm-studio-render` CLI |
 | GUI "features view" — per-trace feature values overlaid on the waveform display | **`egm-studio`** `gui/views/features.py` (lands in Refactor Step 6) | Interactive bank inspection alongside other GUI tabs |
 | Synthetic v2 tuning loops (change a sim param, recompute features, see if distributions converge toward IAFDB) | **`synthetic-egm-pipeline`** as a `synthegm-feature-compare` CLI or notebook (Phase 1.5 work) | Producer-side iteration tool |
 | Ad-hoc notebook exploration during Phase 1.5 | **`intracardiac-platform/examples/`** or local-only notebooks | Researcher-driven, not necessarily version-controlled at the analysis level |

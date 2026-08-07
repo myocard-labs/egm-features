@@ -25,7 +25,11 @@ jobs:
           cache: pip
 
       - name: Install ruff
-        run: pip install "ruff>=0.6.0"
+        # Pinned to match .pre-commit-config.yaml so local == CI. Unpinned,
+        # CI resolved the newest ruff at run time and a release that changed
+        # formatting behaviour turned the lint job red on untouched files.
+        # Bump here and in .pre-commit-config.yaml together.
+        run: pip install "ruff==0.15.17"
 
       - name: ruff check
         run: ruff check .
@@ -49,10 +53,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install package + dev extras
+      # The catch22 extra is included so the full suite runs. pycatch22
+      # publishes no wheels, so pip builds it from source — the runner has
+      # build-essential, and we deliberately do NOT assume a wheel appears.
+      - name: Install package + dev and catch22 extras
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,catch22]"
 
       - name: Run pytest
         run: pytest --cov --cov-report=xml --cov-report=term
@@ -64,6 +71,46 @@ jobs:
           name: coverage-xml
           path: coverage.xml
           if-no-files-found: warn
+
+  # The base install is a supported configuration, not an afterthought: the
+  # eleven native features must work with no C toolchain and no pycatch22, and
+  # asking for a catch22 feature must fail with instructions rather than a
+  # NaN column or a bare ModuleNotFoundError. Nothing in the main matrix can
+  # prove that, because the extra is installed there.
+  base-install:
+    name: Base install (no catch22 extra)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package + dev extras only
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # Without this, the job silently degrades into a duplicate of the main
+      # matrix the moment something pulls pycatch22 in transitively: every
+      # catch22 test would run and pass, and the base-install path would go
+      # unexercised while the job still reported green.
+      - name: Assert the optional extra really is absent
+        run: |
+          python - <<'PY'
+          import importlib.util, sys
+          if importlib.util.find_spec("pycatch22") is not None:
+              sys.exit("pycatch22 is installed; this job must run without it")
+          print("pycatch22 absent, as required")
+          PY
+
+      # -rs lists the skips, so the log shows the catch22 tests were skipped
+      # rather than silently absent.
+      - name: Run pytest (catch22 tests skip)
+        run: pytest -q -rs
 
   typecheck:
     name: Type check (mypy)

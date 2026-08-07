@@ -2,11 +2,11 @@
 # pyproject.toml — myocard-egm-features
 #
 # Per-trace morphology + spectral + complexity feature extractors for
-# intracardiac bipolar EGM signals. NumPy/SciPy-only library — no torch,
-# no HDF5 I/O (egm-data owns that). The feature math lives in three
-# modules (time_domain, frequency, complexity) with a thin bundle helper
-# that runs all 11 features over a batch of traces and returns a tidy
-# pandas DataFrame.
+# intracardiac bipolar EGM signals. NumPy/SciPy library — no torch, no
+# HDF5 I/O (egm-data owns that). The native feature math lives in three
+# modules (time_domain, frequency, complexity); the catch22 set lives in
+# catch22.py behind an optional extra. A bundle helper runs any selection
+# over a batch of traces and returns a tidy pandas DataFrame.
 #
 # Convention recap (LOCKED-IN 2026-06-13, see intracardiac-platform/project/refactor_checklist.md):
 #   GitHub repo  : egm-features                  (bare)
@@ -20,7 +20,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "myocard-egm-features"
-version = "0.1.1"
+version = "0.2.0"
 description = "Per-trace morphology + spectral + complexity feature extractors for intracardiac bipolar EGM signals."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -51,20 +51,43 @@ classifiers = [
 ]
 
 dependencies = [
-  "numpy>=1.26",
+  # numpy is capped below 2.5 as a deliberate, temporary exception to the
+  # "floors only, never cap runtime deps" convention: numpy 2.5's type stubs
+  # use PEP-695 `type` statements, which mypy refuses to parse under this
+  # project's `python_version = "3.10"`, so an unconstrained resolve breaks
+  # the type-check job on code that never changed. The cap is about stub
+  # parseability, not runtime behaviour, and EXPIRES once the Python floor
+  # moves past 3.11. Matches the rest of the fleet.
+  "numpy>=1.26,<2.5",
   "scipy>=1.11",
   "pandas>=2.0",
   "antropy>=0.1.6",
 ]
 
 [project.optional-dependencies]
+# Dev tooling is pinned EXACTLY (not floored) so contributors, pre-commit, and
+# CI all run the same versions — a floor let CI resolve a newer ruff than
+# pre-commit and turned the lint job red on untouched files. Keep ruff in step
+# with .pre-commit-config.yaml and .github/workflows/ci.yml.
 dev = [
   "pytest>=8.0",
   "pytest-cov>=5.0",
-  "ruff>=0.6.0",
-  "mypy>=1.10",
+  "ruff==0.15.17",
+  "mypy==2.1.0",
   "pre-commit>=3.7",
   "nbstripout>=0.7",
+]
+
+# The catch22 feature set (docs/theory.md §4) is OPTIONAL. It is the one
+# dependency that is not pure Python: pycatch22 publishes no wheels, so pip
+# builds it from source and a C compiler must be present. Keeping it out of
+# the base install means the core eleven features stay installable anywhere,
+# and only consumers that want the comparison-feature set pay for a toolchain.
+#
+# Floored, not pinned: this is a runtime dependency, and the fleet convention
+# is floors only for those (the numpy cap above is a documented exception).
+catch22 = [
+  "pycatch22>=0.4.5",
 ]
 
 [project.urls]
@@ -189,5 +212,9 @@ module = [
   "scipy.*",
   "antropy.*",
   "pandas.*",
+  # pycatch22 is a C extension with no py.typed marker and no stubs. It is
+  # also an optional extra, so it is legitimately absent from a base install
+  # and mypy must not fail when it cannot be found.
+  "pycatch22.*",
 ]
 ignore_missing_imports = true

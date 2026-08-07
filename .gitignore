@@ -69,14 +69,18 @@ coverage.xml
 *.ckpt
 *.safetensors
 
-data/
-banks/
-checkpoints/
-runs/
-logs/
-mlruns/
-wandb/
-artifacts/
+# Root-anchored (leading /) on purpose: an unanchored `data/` matches at ANY
+# depth and would silently untrack a same-named SOURCE package such as
+# src/myocard_egm_features/data/ — green locally, ModuleNotFoundError in CI.
+# These are top-level output dirs only.
+/data/
+/banks/
+/checkpoints/
+/runs/
+/logs/
+/mlruns/
+/wandb/
+/artifacts/
 
 # Allow tiny fixtures committed under tests/fixtures/ if needed:
 !tests/fixtures/**
