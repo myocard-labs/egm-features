@@ -82,10 +82,10 @@ project-lead's compute-all-then-filter rule.)* Every path computes exactly what 
 > | 1 | 0.003 ms | 0.01× |
 > | 3 | 0.016 ms | 0.04× |
 > | 6 | 0.086 ms | 0.23× |
-> | **14** (usable-now set) | 0.164 ms | **0.44×** |
+> | **14** (a typical study subset) | 0.164 ms | **0.44×** |
 > | 22 | 0.368 ms | 0.99× |
 >
-> End-to-end through `Catch22Provider`: all 24 = 0.424 ms, the usable-now 14 = 0.229 ms (1.9×
+> End-to-end through `Catch22Provider`: all 24 = 0.424 ms, a 14-feature subset = 0.229 ms (1.9×
 > cheaper), one feature = 0.012 ms (**35×** cheaper). This matters most exactly where Daniel
 > expected — if the §8.2 screening finds only a handful of catch22 features carry signal for the
 > parameter-estimation study, every sweep afterwards pays a fraction of the full cost.
@@ -217,15 +217,37 @@ the cost and `shannon_entropy` is 3.5× more expensive. Fixed at S8.
 > needed. Recorded because the reasoning is worth not re-deriving: **every feature this library can
 > compute has a documented definition and a test anchor, and that is a property worth keeping.**
 
-**Named sets shipped** (per `parameter_estimator_design.md` B.3) — membership **provisional** pending
-the §8.2 screening (B.3 requires it; D12 gives it a shortlist to check first):
+**D14 · No study-specific feature sets in the library.** *(Daniel, 2026-08-06, reviewing S5.)*
+S5 originally shipped a `catch22_usable_now` set — the 14 expected to behave at `T = 192`, per
+theory.md §4.1.3. **Removed.** That is a curated judgement for one study at one window length, and
+this repo's charter is arrays in, feature values out. A consumer working at `T = 512` or on
+multi-beat windows would inherit a set named for their situation and wrong for it. It also breaks
+the standing convention that **libraries ship no policy defaults** — those live in schemas or the
+executable consumer's config — which I should have caught when writing it.
+
+**Per-feature `min_length` was considered and rejected**, not merely deferred: we have no
+defensible thresholds. `dfa` does not work at 192 samples and fail at 191; it degrades
+continuously, and §4.1.3's read is a judgement, not a number. Encoding one would manufacture
+precision the literature does not give us, and would look authoritative while being invented.
+
+**What replaces it:** nothing in the library. `FEATURE_SETS` keeps only structural groupings
+(`egm_features`, `egm_features+catch22`) and canonical ones (`catch22`, `catch24`); a study set is
+one call — `resolve(["peak_to_peak", "trev", "entropy_pairs"])`. The reliability *knowledge* stays
+in theory.md §4.1.3, which is where it belongs: the library documents what is known about each
+feature, the consumer decides which to use. **egm-studio consequence:** B.3's "catch22 subset fixed
+in code" is now fixed in *their* code. Raised as **CL-142**.
+
+**Backlogged instead:** a coarse short-trace warning (roadmap.md) — `pycatch22` returns numbers for
+a 5-sample input, and nothing detects it. Scoped as an absurdity guard, not per-feature minimums.
+
+**Named sets shipped** — **structural and canonical groupings only**, per D14. No study-specific
+curation; the §8.2 screening's outcome is the consumer's to encode, not ours:
 
 | Set name | Members | Needs the extra? |
 |---|---|---|
 | `egm_features` | the existing 11 | no |
 | `catch22` | all 22 | yes |
 | `catch24` | all 22 + `mean` + `std_dev` | yes |
-| `catch22_usable_now` | the 14 — skips the self-affine pair (`rs_range`, `dfa`); defers the linear-autocorrelation family (`acf_timescale`, `acf_first_min`, `periodicity`, `ami_timescale`, `low_freq_power`, `centroid_freq`) to the multi-beat phase | yes |
 | `egm_features+catch22` | 11 + 22 — the STU4 Decision-1 config | yes |
 
 ## Steps
@@ -376,16 +398,35 @@ states its verification. ☐ todo · 🔨 wip · ✅ done.
   **135 tests pass** (was 130); ruff exit 0; no new mypy findings.
 - **Depends on:** S3.
 
-### S5 — Feature-set registry ☐ (est. 1–2 h)
+### S5 — Feature-set registry ✅ (est. 1–2 h)
 
-- **Change:** New `src/myocard_egm_features/sets.py` — a `FEATURE_REGISTRY` mapping every feature
-  name to its **provider** (D3) and the project-standard policy arguments the bundle already
-  hardcodes, plus the five `FEATURE_SETS` presets from the table above and a
-  `resolve(selection) -> list[str]` helper accepting a set name or an explicit name list.
-- **Verify:** preset membership matches the table (notably `catch22_usable_now` has exactly 14 and
-  excludes the 8 deferred names); unknown names raise with a helpful message; registry names are
-  unique and every one has a theory.md entry; resolving a catch22 set without the extra installed
-  raises the D2 ImportError, not a `KeyError`.
+- **Change:** New `src/myocard_egm_features/sets.py`, pure metadata — nothing here touches a signal.
+  `FEATURE_REGISTRY` maps all 35 names to their owning provider; `ALL_FEATURE_NAMES` fixes canonical
+  order (native 11, then catch24's 24) so two callers asking for the same set get identically-ordered
+  columns; `FEATURE_SETS` holds the five presets; `resolve(selection)` accepts a set name *or* a name
+  list and returns canonical order, deduplicated; `group_by_provider(names)` splits a mixed selection
+  so each provider is called **once** (which is what preserves both providers' selection strategies —
+  the native one's shared periodogram, and not re-paying setup on either); `check_available(names)`
+  raises the install message before extraction.
+- **Refinement to the planned criterion.** The plan said resolving a catch22 set without the extra
+  should raise the ImportError. It doesn't — **`resolve` is metadata and never raises ImportError**,
+  because asking *what a set contains* is how someone decides whether installing a C toolchain is
+  worth it, and it cannot itself require the toolchain. That would also contradict the Protocol rule
+  that `feature_names` works when `available()` is `False`. The intent is met by
+  **`check_available`**, called at the point of extraction (S6), which surfaces the provider's own
+  actionable message rather than a `KeyError` or a silent `NaN` column.
+- **One design note worth keeping:** `check_available` *provokes* the provider's own `ImportError`
+  rather than restating install instructions. Duplicating them here would give the module a second
+  copy to drift and would need editing for every provider added.
+- **Verify:** ✅ the shipped set list is pinned **exactly** (adding a convenience set is the
+  temptation D14 guards against, so it fails the build); `catch24` minus `catch22` is exactly
+  `{mean, std_dev}`, and that pair
+  appears in **no other set** (D9); every set member is a registered feature; a name claimed by two
+  providers raises at **import**; `resolve` normalises order and duplicates and rejects unknown
+  sets/names with messages naming what exists; `resolve` works with `pycatch22` unimportable;
+  grouping covers every requested name and omits idle providers; `check_available` passes for a
+  native-only set on a base install and raises the install message for a catch22 one.
+  **156 tests pass** (was 135); ruff exit 0; mypy unchanged from the pre-S5 baseline.
 - **Depends on:** S4.
 
 ### S6 — Bundle integration: `extract_catch22` + `features=` ☐ (est. 1–2 h)

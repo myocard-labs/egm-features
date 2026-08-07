@@ -103,6 +103,29 @@ antropy variants if they ship. Wait for evidence of friction.
 > first. FEA1 measures per-trace extraction cost at its S7 — that measurement is what would
 > trip this trigger, if anything does.
 
+### Warn when a trace is too short to feature-extract meaningfully
+
+Nothing currently detects an absurdly short trace. `pycatch22` returns *numbers* for a
+5-sample input — not `NaN`, not an error — and several native features degrade quietly
+too. A caller who accidentally feeds a truncated or empty-ish window gets plausible
+values and no signal that they are meaningless.
+
+Proposal: a **coarse absurdity guard** in the extraction path — warn once per batch when
+traces fall below some clearly-indefensible length (a few dozen samples), in the same
+aggregated style as the `NaN` warning.
+
+> **Deliberately coarse.** The tempting version is a per-feature `min_length`, but we have
+> no defensible numbers: `dfa` does not work at 192 samples and fail at 191, it degrades
+> continuously, and `docs/theory.md` §4.1.3's reliability read is a judgement rather than a
+> threshold. Per-feature minimums would manufacture precision the literature does not give
+> us and would look authoritative while being invented. A guard that only catches the
+> obviously-broken case is honest and still closes the real gap.
+>
+> → Component-internal. Trigger: someone gets confused by values from a short trace, or a
+> consumer asks for the check. Related: §4.1.3 documents *which* features want longer
+> windows, which is the knowledge a consumer needs to choose — this item is only about
+> catching accidents.
+
 ### Open API questions
 
 Worth thinking about as the next consumer arrives; none need a decision yet:
