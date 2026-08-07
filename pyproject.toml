@@ -2,11 +2,11 @@
 # pyproject.toml — myocard-egm-features
 #
 # Per-trace morphology + spectral + complexity feature extractors for
-# intracardiac bipolar EGM signals. NumPy/SciPy-only library — no torch,
-# no HDF5 I/O (egm-data owns that). The feature math lives in three
-# modules (time_domain, frequency, complexity) with a thin bundle helper
-# that runs all 11 features over a batch of traces and returns a tidy
-# pandas DataFrame.
+# intracardiac bipolar EGM signals. NumPy/SciPy library — no torch, no
+# HDF5 I/O (egm-data owns that). The native feature math lives in three
+# modules (time_domain, frequency, complexity); the catch22 set lives in
+# catch22.py behind an optional extra. A bundle helper runs any selection
+# over a batch of traces and returns a tidy pandas DataFrame.
 #
 # Convention recap (LOCKED-IN 2026-06-13, see intracardiac-platform/project/refactor_checklist.md):
 #   GitHub repo  : egm-features                  (bare)
@@ -20,7 +20,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "myocard-egm-features"
-version = "0.1.1"
+version = "0.2.0"
 description = "Per-trace morphology + spectral + complexity feature extractors for intracardiac bipolar EGM signals."
 readme = "README.md"
 license = { file = "LICENSE" }

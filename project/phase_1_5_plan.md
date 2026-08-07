@@ -2,7 +2,7 @@
 
 **Repo:** egm-features · **Phase:** 1.5
 **Phase design doc:** `intracardiac-platform/phases/phase_1_5/design.md`
-**Status:** in progress · **Progress:** 1/9 steps done (S0 ✅)
+**Status:** implementation done · **Progress:** 9/9 steps done (S0–S8 ✅)
 **Wave:** FEA1 is **Wave 1**, position 9 of 10 — *next* after iafdb's B22/S0 — and the Wave-1 gate
 requires this repo **tagged**, so S8 ends in a v0.2.0 release, not just a merge.
 **Repo estimate:** **9–18 h active** (Cx = **M / 3 pts**, cold-start by-analogy range — see
@@ -505,7 +505,7 @@ states its verification. ☐ todo · 🔨 wip · ✅ done.
 - No benchmark added as a CI gate — architecture.md keeps profiling component-internal.
 - **Depends on:** S6.
 
-### S8 — Docs + phase exit ☐ (est. 1–2 h)
+### S8 — Docs + phase exit ✅ (est. 1–2 h)
 
 - **Change:** `docs/usage.md` (new API + sets + the NaN policy + the measured costs),
   `README.md` (feature count, the `[catch22]` extra and its **build-tools requirement**),
@@ -514,8 +514,51 @@ states its verification. ☐ todo · 🔨 wip · ✅ done.
   registry-vs-adapter boundary), `CHANGELOG.md` `[Unreleased]`, `roadmap.md` (drop the now-answered
   `features=[...]` open API question; re-file the Wittkampf upgrade + extra features as
   **watch-triggered**, per design §4), version → 0.2.0.
-- **Verify:** the full pre-PR run in `intracardiac-platform/project/pr_checklist.md` passes.
+- **Verify:** ✅ full pre-PR run — ruff check and format exit 0, `src/` mypy-clean, **178 tests
+  pass** with the extra and **129 pass / 49 skip** on a simulated base install, no IDE/venv/large
+  files, version consistent across `pyproject.toml` (0.2.0), installed metadata, and the CHANGELOG.
+  Every code example in `README.md` and `docs/usage.md` was **executed**, not eyeballed.
+- **Docs corrected, not just extended.** Four claims in the existing docs had gone stale or were
+  wrong, and each is fixed where it lives rather than contradicted elsewhere:
+  1. `architecture.md` said the policy constants live in `bundle.py` — they moved to `providers.py`
+     at S2, with the reason (the cycle it would otherwise create) recorded.
+  2. `architecture.md` pencilled the typed-contract work in "at v0.2.0" — v0.2.0 is FEA1's release,
+     so that note now says it lands later, matching `roadmap.md`.
+  3. `usage.md` and `roadmap.md` said `sample_entropy` dominates cost — corrected at S7, with the
+     instruction to re-measure when `T` changes rather than restate a fixed ordering.
+  4. The package docstring, README module map, and `pyproject.toml` header all described a
+     three-module, eleven-feature library.
+- **New durable rationale in `architecture.md`,** promoted from the plan's design notes so it
+  outlives this file: why catch22 gets **no** per-feature wrappers (the antropy pattern encodes
+  parameter policy; catch22 has no parameters), why we key off hctsa codes, the provider seam and
+  the per-provider selection contract, and why the registry ships no study-specific sets.
+- **Backlogged at review (Daniel):** verify the catch22 extra installs on **Windows and macOS**.
+  Everything verified so far is Linux — CI, Daniel's box, the project-lead's clean build — and
+  `pycatch22` compiles from source everywhere. Windows needs MSVC Build Tools, a multi-GB installer
+  often blocked on managed university machines, which is exactly the population most likely to want
+  this library. The item says measure first, then prefer upstream wheels or conda-forge over a
+  pure-Python reimplementation, since D1 rejected reimplementation on correctness grounds. It also
+  notes `CATCH22_EXTRA_HINT`'s "build-essential on Debian/Ubuntu" text is Linux-only and needs
+  fixing regardless of the verdict. Ties to D2's post-Phase-2 deferral and the project-level
+  publishing-timing decision.
 - **Depends on:** all prior steps.
+
+## Phase exit
+
+FEA1 is complete. What remains is not implementation:
+
+1. **PR `development → release`**, using `intracardiac-platform/project/pr_checklist.md` (run above).
+2. **Tag `v0.2.0`** — the Wave-1 gate requires egm-signal *and* egm-features tagged before Wave 2
+   begins (design §7), so this repo's tag is a gating artifact, not just bookkeeping.
+3. **Report up to the project-lead** so design §10's Wave-1 row can move.
+4. **Delete this plan at phase cleanup** — per the template it is ephemeral, and its durable content
+   has already been moved: design rationale to `architecture.md`, shipped work to `CHANGELOG.md`,
+   deferred work to `roadmap.md`. Effort tracking was skipped this phase (design §6), so nothing
+   rolls up to `estimation_ledger.csv`.
+
+**Open coordination-log items raised by this repo, all non-blocking:** CL-140 (the pycatch22
+naming retraction), CL-141 (D4 revised — no bulk discount), CL-142 (egm-studio owns its own catch22
+subset). None gate the tag.
 
 ## Effort tracking
 

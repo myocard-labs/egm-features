@@ -85,9 +85,9 @@ and any consumer that wants schema-validated output.
 > coordinate" and `intracardiac-platform/project/refactor_checklist.md` Step 4 follow-up.
 >
 > **Confirmed out of Phase 1.5** (2026-07-28): `egm_features_bank` is not in the phase's
-> Wave-1 contract bump (design §5), so the prerequisite doesn't land this phase. Note
-> `project/architecture.md` pencils this work in "at v0.2.0" — v0.2.0 is now FEA1's release,
-> so this simply lands in a later version. Architecture.md is corrected at FEA1's S8.
+> Wave-1 contract bump (design §5), so the prerequisite doesn't land this phase. v0.2.0
+> shipped the catch22 set instead, so this work lands in a later version —
+> `project/architecture.md`'s "at v0.2.0" note was corrected accordingly at FEA1's S8.
 
 ### Performance optimization (if extraction becomes a friction)
 
@@ -112,6 +112,55 @@ antropy variants if they ship. Wait for evidence of friction.
 > → Component-internal; no phase home until friction shows up. Also named in design §4's
 > deferred watch-trigger set ("feature/studio perf accel"), so the phase agrees: evidence
 > first. **S7's measurement is that evidence, and it does not trip the trigger.**
+
+### Verify the catch22 extra installs on Windows and macOS
+
+**Everything we know about installing `pycatch22` is Linux.** The CI matrix is
+`ubuntu-latest`, Daniel develops on Ubuntu, and the project-lead's clean-box build was
+Linux. `pycatch22` publishes **no wheels**, so every install compiles from source — and
+the toolchain story is very different off Linux:
+
+| platform | what a source build needs | how big an ask |
+|---|---|---|
+| Linux | `build-essential` | one `apt install`, usually already present |
+| macOS | Xcode Command Line Tools | one command, a few GB, generally allowed |
+| **Windows** | **MSVC Build Tools** | multi-GB installer, and **frequently blocked on managed university machines** |
+
+**Windows is the one that matters.** The external audience for this library is academic
+EP researchers, and a large share of them are on institutional Windows laptops where
+installing a C compiler needs IT approval they will not pursue for one dependency. If
+`pip install "myocard-egm-features[catch22]"` fails there, the practical outcome is that
+catch22 is unavailable to the people most likely to want it.
+
+**What to actually do:**
+
+1. **Measure before designing.** Try a clean `pip install "myocard-egm-features[catch22]"`
+   on Windows and macOS — both a base install and the extra — and record what breaks and
+   what the failure text looks like. It may simply work; `pycatch22`'s sdist is small and
+   ANSI C, and MSVC may handle it unmodified.
+2. **If Windows fails**, options in rough order of preference:
+   - **Upstream.** Ask whether `pycatch22` would publish wheels (`cibuildwheel` makes this
+     routine). Best outcome for everyone and costs us nothing but a request.
+   - **conda-forge.** Check whether a built `pycatch22` package exists there; conda is
+     common in academic environments precisely because it avoids compiler requirements.
+   - **Document the limitation honestly** and let Windows users run the native eleven,
+     which need no toolchain and are the clinically-grounded half anyway.
+   - **A pure-Python fallback provider** is the seam's whole point (D2's second hedge) —
+     but note the tension with D1: we chose to wrap the reference implementation
+     *specifically* to avoid a silent correctness risk in the feature set whose job is
+     detecting sim-vs-real differences. A reimplementation reintroduces exactly that risk,
+     so it is the last resort, not the first.
+3. **Fix the platform-specific error text either way.** `CATCH22_EXTRA_HINT` currently says
+   "build-essential on Debian/Ubuntu", which is unhelpful-to-misleading on Windows and
+   macOS. Whatever the install verdict, the message should name the right prerequisite for
+   the platform it is printed on.
+
+> → Component-internal, but gated by a project-level decision: PyPI publishing is deferred
+> to first-paper time (`intracardiac-platform` — publishing timing), and D2 deferred the
+> non-Linux question to post-Phase-2 on the grounds that "publishing to toolchain-less
+> machines is the only place it would bite." **That is precisely the moment this becomes
+> real.** Trigger: before any external release, or sooner if a collaborator on Windows or
+> macOS needs the catch22 features.
 
 ### Warn when a trace is too short to feature-extract meaningfully
 

@@ -41,6 +41,13 @@ extract features from an EGM trace in a notebook can
 `pip install myocard-egm-features` and skip everything else in the
 project.
 
+Two feature families ship: the **eleven** clinically-grounded
+morphology, spectral, and complexity features this library started
+with, and the **catch22** set (22, or 24 with `catch24`'s mean and
+standard deviation). They are complementary rather than overlapping —
+catch22 is computed on the z-scored trace and so cannot see amplitude
+at all, which is the axis voltage mapping is built on.
+
 ---
 
 ## Install
@@ -48,8 +55,17 @@ project.
 From PyPI (when published):
 
 ```bash
-pip install myocard-egm-features
+pip install myocard-egm-features            # the eleven native features
+pip install "myocard-egm-features[catch22]" # + the catch22 set
 ```
+
+The `catch22` extra is optional because it is the one dependency that
+is not pure Python. `pycatch22` publishes no wheels, so pip builds it
+from source and **a C compiler must be available** (`build-essential`
+on Debian/Ubuntu). Keeping it out of the base install means the eleven
+native features stay installable anywhere; a base install that asks
+for a catch22 feature fails with instructions rather than a confusing
+`ModuleNotFoundError`.
 
 From source during pre-1.0 iteration:
 
@@ -66,8 +82,9 @@ pip install -e ".[dev]"
 pre-commit install
 ```
 
-Runtime deps: `numpy>=1.26`, `scipy>=1.11`, `pandas>=2.0`,
-`antropy>=0.1.6`. No PyTorch, no h5py.
+Runtime deps: `numpy>=1.26,<2.5`, `scipy>=1.11`, `pandas>=2.0`,
+`antropy>=0.1.6`, plus `pycatch22>=0.4.5` with the `catch22` extra.
+No PyTorch, no h5py.
 
 ---
 
@@ -89,8 +106,30 @@ df.shape       # (100, 11)
 df.columns     # ['peak_to_peak', 'zero_crossings', ..., 'higuchi_fractal_dimension']
 ```
 
-`bundle.extract_all` hardcodes the project's standard policy values
+`bundle.extract_all` applies the project's standard policy values
 (`method="dvdt_max"`, `threshold_frac=0.3`, `binarize_method="median"`).
+
+### Choosing which features to compute
+
+The default is the eleven above. `features=` narrows or widens it —
+by set name or by an explicit list — and **only what you ask for is
+computed**, which is the main performance lever:
+
+```python
+# A named set. No fs_hz needed: no catch22 feature takes one.
+df = bundle.extract_all(signals, features="catch22")
+
+# An explicit study set, spanning both families.
+df = bundle.extract_all(signals, features=["peak_to_peak", "trev", "entropy_pairs"])
+```
+
+Columns come back in a canonical order regardless of the order you
+asked for them, so two callers requesting the same features get
+identically-ordered frames.
+
+`fs_hz` is required only when a requested feature actually needs it —
+the three spectral features of `docs/theory.md` §2. Omitting it when
+something does need it raises an error naming which one.
 
 ### Per-module batch helpers
 
@@ -140,7 +179,10 @@ the math-vs-policy split and performance notes.
 | `myocard_egm_features.time_domain` | `peak_to_peak`, `zero_crossings`, `activation_position` (dV/dt or abs-peak), `sec_peak_count`. |
 | `myocard_egm_features.frequency` | `periodogram` (public PSD helper), `spectral_centroid`, `spectral_entropy`, `dominant_frequency`. PSD-reuse path via optional `freqs`/`psd` kwargs. |
 | `myocard_egm_features.complexity` | `sample_entropy` (Richman 2000), `shannon_entropy` (histogram-based), `lempel_ziv_complexity` (LZ76 + median binarize), `higuchi_fractal_dimension` (Higuchi 1988). |
-| `myocard_egm_features.bundle` | `extract_all` + per-module `extract_<module>` helpers. Project-standard policy values live here as module-level constants (`ACTIVATION_METHOD`, `LZ_BINARIZE_METHOD`, etc.). |
+| `myocard_egm_features.catch22` | The catch22 set (`docs/theory.md` §4): `catch22_all`, `catch22_features` (a named subset), `catch22_feature` (one). Needs the `catch22` extra. |
+| `myocard_egm_features.providers` | The `FeatureProvider` seam — `NativeProvider`, `Catch22Provider` — plus the project-standard policy constants (`ACTIVATION_METHOD`, `LZ_BINARIZE_METHOD`, …), which `bundle` re-exports under their original names. |
+| `myocard_egm_features.sets` | The feature-set registry: what exists, who computes it, and the named groupings. `resolve`, `group_by_provider`, `check_available`. |
+| `myocard_egm_features.bundle` | `extract_all` (with `features=` selection) + `extract_catch22` + the per-module `extract_<module>` helpers. |
 
 ---
 

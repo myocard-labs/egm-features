@@ -21,7 +21,8 @@ features.
 ## Installation
 
 ```bash
-pip install myocard-egm-features
+pip install myocard-egm-features            # the eleven native features
+pip install "myocard-egm-features[catch22]" # + the catch22 set
 ```
 
 Editable / development install from a clone:
@@ -29,15 +30,42 @@ Editable / development install from a clone:
 ```bash
 git clone https://github.com/myocard-labs/egm-features
 cd egm-features
-pip install -e ".[dev]"
+pip install -e ".[dev,catch22]"
 ```
 
-Dependencies are lean: `numpy>=1.26`, `scipy>=1.11`, `pandas>=2.0`,
-`antropy>=0.1.6`. No PyTorch, no HDF5, no internal `myocard-` deps.
+Dependencies are lean: `numpy>=1.26,<2.5`, `scipy>=1.11`,
+`pandas>=2.0`, `antropy>=0.1.6`. No PyTorch, no HDF5, no internal
+`myocard-` deps.
+
+### The catch22 extra needs a C compiler
+
+`pycatch22` publishes no wheels, so pip builds it from source and a
+toolchain must be present — `build-essential` on Debian/Ubuntu. That
+is why it is optional rather than a base dependency: the eleven native
+features stay installable anywhere.
+
+A base install is fully supported and CI tests it as its own job. Ask
+for a catch22 feature without the extra and you get instructions, not
+a puzzle:
+
+```
+catch22 features require the optional 'catch22' extra, which is not installed.
+    pip install "myocard-egm-features[catch22]"
+pycatch22 publishes no wheels, so pip builds it from source: a C compiler
+must be available (build-essential on Debian/Ubuntu).
+The eleven native features in docs/theory.md §1-§3 need no extra and are
+always available.
+```
+
+You can always ask *what* a feature set contains without the extra
+installed — deciding whether a toolchain is worth it should not itself
+require the toolchain.
 
 ## Quickstart
 
-The 90% use case: extract all 11 features over a batch of traces.
+The 90% use case: extract the eleven native features over a batch
+of traces. See [Choosing which features to compute](#choosing-which-features-to-compute)
+for catch22 and for narrowing the set.
 
 ```python
 import numpy as np
@@ -60,6 +88,91 @@ print(df.columns.tolist())
 columns in [`theory.md`](theory.md) §1 → §2 → §3 order. Join it with
 per-trace metadata (sim_id, patient_id, label) from your bank record
 in the usual pandas way.
+
+## Choosing which features to compute
+
+`extract_all`'s default is the eleven native features, unchanged since
+v0.1.0. Pass `features=` to ask for something else — a set name or an
+explicit list — and **only what you ask for is computed**:
+
+```python
+from myocard_egm_features import bundle, sets
+
+bundle.extract_all(signals, fs_hz=1000.0)                    # the default 11
+bundle.extract_all(signals, features="catch22")              # the canonical 22
+bundle.extract_all(signals, features="egm_features+catch22") # all 33
+bundle.extract_catch22(signals, catch24=True)                # 22 + mean, std_dev
+
+# A study set: amplitude and fractionation from the native features,
+# morphology and dynamics from catch22.
+bundle.extract_all(signals, features=["peak_to_peak", "sec_peak_count",
+                                      "trev", "entropy_pairs"])
+```
+
+The shipped set names:
+
+| set | features | needs the extra |
+|---|---|---|
+| `egm_features` | the native 11 (§1–§3) | no |
+| `catch22` | the canonical 22 (§4) | yes |
+| `catch24` | 22 + `mean`, `std_dev` (§4.11) | yes |
+| `egm_features+catch22` | 33 | yes |
+
+These are **structural and canonical groupings only**. There is
+deliberately no "the features that work well for my study" set: that
+judgement is true for one analysis and false for the next, and this
+library cannot know which situation you are in. Build your own from
+names — `sets.resolve([...])` validates them, rejects typos, and
+returns canonical order. `docs/theory.md` §4.1.3 is the reading for
+deciding which catch22 features suit a given window length.
+
+Columns always come back in canonical order (§1–§3, then §4)
+regardless of request order, so two callers asking for the same
+features get identically-ordered frames.
+
+### fs_hz is required only when something needs it
+
+Only the three spectral features of §2 take a sample rate. Any catch22
+selection, or a time-domain/complexity one, can omit it:
+
+```python
+bundle.extract_all(signals, features="catch22")            # fine, no fs_hz
+bundle.extract_all(signals, features=["peak_to_peak"])     # also fine
+bundle.extract_all(signals, features=["dominant_frequency"])
+# ValueError: fs_hz is required for ['dominant_frequency'] ...
+```
+
+Not *taking* `fs_hz` is not the same as being sample-rate independent.
+`forecast_error` forecasts three samples ahead — 3 ms at 1 kHz, 6 ms at
+500 Hz — and the autocorrelation timescales are measured in samples.
+Those values are only comparable between datasets recorded at the same
+rate.
+
+## NaN on degenerate input, and the warning
+
+Features are `NaN` where the math is undefined: on a constant trace,
+19 of the 22 catch22 features are. Those values are **propagated, not
+replaced** — substituting `0.0` would let a meaningless number enter a
+distribution comparison as though it were real, whereas a `NaN` column
+is visible and droppable.
+
+Because silence is its own failure mode on a long run, a batch that
+produced any `NaN` raises **one** aggregated `RuntimeWarning`:
+
+```
+3 of 1000 traces produced NaN features: mode_5 (3), mode_10 (3), ... .
+NaN is propagated, not replaced, so these reach your DataFrame as-is.
+Usual causes: a constant or near-constant trace, a dropped channel, or
+non-finite samples.
+```
+
+One per batch, not per trace. The values themselves are untouched —
+the warning is diagnostic only.
+
+> A **short** trace is not detected. `pycatch22` returns numbers for a
+> five-sample input rather than `NaN`, and nothing here will tell you
+> they are meaningless. `docs/theory.md` §4.1.3 documents which
+> features want longer windows.
 
 ## Three ways to use the library
 
