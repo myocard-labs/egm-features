@@ -91,17 +91,27 @@ and any consumer that wants schema-validated output.
 
 ### Performance optimization (if extraction becomes a friction)
 
-`sample_entropy` is O(T²) and `higuchi_fractal_dimension` is O(k_max·T) — both fine at
-current scale (T=512, ~ms/trace; ~5–10 s for an N=10000 bank). If a future Phase 4 / 7
-(longer traces, larger banks) makes extraction slow enough to be a real iteration
-friction: `numba` JIT for our hand-written inner loops (`shannon_entropy`), `joblib`
-parallel iteration in `bundle.extract_all` (currently a serial loop), or C-accelerated
+**Measured at FEA1's S7** (N=1000 EGM-like traces, T=192, 1 kHz): the native eleven cost
+**0.91 ms/trace** — 9.1 s for a 10,000-trace bank — and all 33 features cost 1.50 ms/trace
+(15.0 s). Per feature: `shannon_entropy` 0.34 ms, the shared periodogram 0.14 ms,
+`sample_entropy` 0.10 ms, `lempel_ziv_complexity` 0.06 ms, the other seven under 0.03 ms.
+
+> **This entry previously asserted `sample_entropy` was the bottleneck.** That was inherited
+> from v0.1.0 and is **wrong at T = 192**, where it is 14% of the cost and `shannon_entropy`
+> is 3.5× more expensive. The original claim holds at T = 512, where the `O(T²)` term takes
+> over — so the ordering will swing back at longer trace lengths, and the profile should be
+> re-measured rather than assumed whenever `T` changes. `docs/usage.md` carries the same
+> correction.
+
+Nothing here is currently friction: **selection is the lever that already exists**, and a
+three-feature study set costs 0.06 ms/trace, a fifteenth of the default. If a future Phase 4 / 7
+(longer traces, larger banks) makes extraction genuinely slow: `numba` JIT for our hand-written
+inner loops, `joblib` parallel iteration in `bundle` (currently a serial loop), or C-accelerated
 antropy variants if they ship. Wait for evidence of friction.
 
 > → Component-internal; no phase home until friction shows up. Also named in design §4's
 > deferred watch-trigger set ("feature/studio perf accel"), so the phase agrees: evidence
-> first. FEA1 measures per-trace extraction cost at its S7 — that measurement is what would
-> trip this trigger, if anything does.
+> first. **S7's measurement is that evidence, and it does not trip the trigger.**
 
 ### Warn when a trace is too short to feature-extract meaningfully
 

@@ -193,22 +193,41 @@ so a different policy never leaks into the codebase by accident.
 
 ## Performance notes
 
-The slowest feature by an order of magnitude is `sample_entropy`,
-which scales as roughly `O(T²)` in the trace length and runs in
-about ~10ms per trace at T=512 on a modern laptop. `extract_all`
-over an N=1000, T=512 batch takes ~10–15 seconds total, dominated
-by sample_entropy.
+Measured on N=1000 EGM-like traces at T=192 samples, 1 kHz
+(a biphasic activation at a varying position plus noise):
 
-For workflows that only need the cheap features (time-domain or
-frequency) over large batches, use the per-module helpers directly
-to skip the complexity step. The `extract_frequency` helper also
-threads a PSD-reuse optimization through — it computes the
-periodogram once per trace and passes it into all three frequency
-features, rather than recomputing three times.
+| selection | per trace | per 10,000-trace bank |
+|---|---|---|
+| the native 11 (default) | 0.91 ms | 9.1 s |
+| `catch22` (22) | 0.41 ms | 4.1 s |
+| `catch24` (24) | 0.42 ms | 4.2 s |
+| both, `egm_features+catch22` (33) | 1.50 ms | 15.0 s |
+| a 3-feature study set | 0.06 ms | 0.6 s |
 
-If you need fast iteration on the time-domain or frequency features
-during a sweep, run `extract_time_domain` + `extract_frequency`
-upfront and add `extract_complexity` only for the final run.
+**Ask for what you need.** Every provider computes only the
+requested features, so a three-feature selection costs about a
+fifteenth of the default eleven rather than the same as all of
+them. This is the main lever available:
+
+```python
+# Cheap: three features, no periodogram, no entropy.
+df = bundle.extract_all(signals, features=["peak_to_peak", "trev", "entropy_pairs"])
+```
+
+**Which features actually cost anything**, per trace at T=192:
+`shannon_entropy` 0.34 ms, the shared periodogram 0.14 ms,
+`sample_entropy` 0.10 ms, `lempel_ziv_complexity` 0.06 ms, and the
+remaining seven under 0.03 ms each.
+
+> Earlier versions of this document said `sample_entropy` dominated.
+> That was true at T=512, where its `O(T²)` term takes over — at
+> T=192 it is about 14% of the total and `shannon_entropy` costs
+> 3.5× more. If you work at longer trace lengths, expect the
+> ordering to swing back.
+
+The three frequency features share one periodogram, computed once
+per trace and only when at least one of them is requested — so a
+time-domain or complexity-only selection skips it entirely.
 
 ## Where to look next
 

@@ -475,7 +475,7 @@ states its verification. ☐ todo · 🔨 wip · ✅ done.
 - **178 tests pass** (was 171); default output re-verified identical to HEAD after both changes.
 - **Depends on:** S5.
 
-### S7 — Base-install guard + CI + cost measurement ☐ (est. 1.5–3 h)
+### S7 — Base-install guard + CI + cost measurement ✅ (est. 1.5–3 h)
 
 - **Change:** CI installs `.[dev,catch22]` for the main test matrix — **no wheel assumed**, the
   runner compiles from sdist — plus a **base-install job** that installs `.[dev]` only and runs a
@@ -484,9 +484,25 @@ states its verification. ☐ todo · 🔨 wip · ✅ done.
   union on a realistic `(N=1000, T=512)` batch; record the numbers in `docs/usage.md` so STU4/STU5
   can size their sweeps, and confirm or refute D6's "negligible next to `sample_entropy`" claim with
   an actual figure.
-- **Verify:** both CI jobs green; the base-install job genuinely lacks `pycatch22` (assert
-  `Catch22Provider.available()` is false there); measured figures written down. No benchmark added
-  as a CI gate — architecture.md keeps profiling component-internal.
+- **Verify:** ✅ the base-install path was **actually run**, not just configured: hiding `pycatch22`
+  from the import system via a `sitecustomize` meta-path blocker gives a true absence
+  (`find_spec` raises, `pycatch22_available()` is `False`), and the full suite then reports
+  **129 passed, 49 skipped, 0 failed**. The local recipe, for repeating it without a venv rebuild:
+  put a `sitecustomize.py` inserting a blocking `MetaPathFinder` on `PYTHONPATH`, then run pytest.
+- **The guard step exists because the job would otherwise rot silently.** If anything ever pulled
+  `pycatch22` in transitively, every catch22 test would run and pass, the base-install path would go
+  unexercised, and the job would still report green. So it asserts absence explicitly and fails the
+  build if the extra is present. `-rs` lists the skips so the log shows they happened.
+- **Measured** (N=1000 EGM-like traces, T=192, 1 kHz): native 11 = **0.91 ms/trace** (9.1 s per 10k
+  bank), catch22 = 0.41 ms, catch24 = 0.42 ms, all 33 = 1.50 ms (15.0 s), a 3-feature study set =
+  **0.06 ms** — a fifteenth of the default. Recorded in `docs/usage.md`.
+- **Second correction to an inherited claim.** Both `docs/usage.md` and `roadmap.md` asserted
+  `sample_entropy` was the extraction bottleneck. At `T = 192` it is **14%** of the cost and
+  `shannon_entropy` is **3.5× more expensive**. The original claim holds at `T = 512`, where the
+  `O(T²)` term takes over, so both documents now say the profile must be **re-measured when `T`
+  changes** rather than restated. The perf watch-trigger is explicitly **not tripped** by this
+  measurement — selection is the lever, and it already exists.
+- No benchmark added as a CI gate — architecture.md keeps profiling component-internal.
 - **Depends on:** S6.
 
 ### S8 — Docs + phase exit ☐ (est. 1–2 h)
