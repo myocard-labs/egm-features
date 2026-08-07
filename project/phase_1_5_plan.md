@@ -429,19 +429,50 @@ states its verification. ☐ todo · 🔨 wip · ✅ done.
   **156 tests pass** (was 135); ruff exit 0; mypy unchanged from the pre-S5 baseline.
 - **Depends on:** S4.
 
-### S6 — Bundle integration: `extract_catch22` + `features=` ☐ (est. 1–2 h)
+### S6 — Bundle integration: `extract_catch22` + `features=` ✅ (est. 1–2 h)
 
 - **Change:** `bundle.extract_catch22(signals, *, catch24=False)` and a `features=` parameter on
-  `extract_all`. When any catch22 feature is selected, call `catch22_all` **once per trace** and
-  slice (D4). Column order follows theory.md section order (§1–§3 then §4); `features=None`
-  preserves today's 11-column output exactly (D8).
-- **Verify:** default output is byte-for-byte the current 11 columns; a selected subset returns
-  exactly those columns in registry order; per-row values agree with the individual extractors; a
-  degenerate trace yields NaN rather than raising (D7); a test asserts the batch path issues **one**
-  `catch22_all` call per trace regardless of how many features were selected (the D4 guard); and
-  **`pytest.warns(RuntimeWarning)`** on a batch containing a degenerate trace, asserting the message
-  names the trace count and the affected features, and that exactly **one** warning is raised for a
-  batch with many bad traces (D7a).
+  `extract_all` accepting a set name or a name list. Providers are grouped **once per call**, not
+  per trace — the grouping depends only on the names, so re-deriving it per trace would add work
+  proportional to the batch for nothing. Availability is checked **before** extraction begins.
+  Column order is canonical (§1–§3 then §4) regardless of request order; `features=None` preserves
+  today's 11-column output exactly (D8).
+- **Verify:** ✅ **default output proved identical to a pristine HEAD checkout** via
+  `pandas.testing.assert_frame_equal` — values, dtypes, index, and columns — which is the D8
+  guarantee stated as a check rather than an intention, and the one that would catch an accidental
+  `int64 → float64` on the two count columns; default still agrees with the three per-module
+  helpers concatenated; selection returns **canonical order, not caller order**, and its values
+  equal the corresponding slice of a full extraction; a set name and a mixed cross-provider list
+  both work; unknown names rejected; non-2D input still rejected; the default path works with
+  `pycatch22` unimportable.
+- **The availability check is asserted to happen *first*.** `test_missing_extra_fails_before_any_extraction`
+  monkeypatches `_extract` to explode, so if availability were checked lazily the test fails —
+  a 10,000-trace batch must die immediately, not after minutes of work.
+- **D7a warning verified as designed:** exactly **one** `RuntimeWarning` for a 50-trace all-degenerate
+  batch (per-trace would emit fifty and slow the loop it reports on); the message names the count
+  (`1 of 4 traces` — the number that says "one bad channel" vs "broken export"), the worst features
+  by frequency, and what happened to the values; `NaN` still reaches the DataFrame unchanged, since
+  the warning is diagnostic and must not alter output; and **clean input warns about nothing**
+  (asserted with `simplefilter("error")`).
+- **Measured end-to-end:** default 11 = 0.94 ms/trace, two features = 0.046 ms/trace (**21× cheaper**),
+  all 33 = 1.52 ms/trace. **171 tests pass** (was 156); ruff exit 0; `src/` mypy-clean, the 12 new
+  findings all the `type-arg` numpy-stub artifact in the new test file, matching existing test style.
+- **Caught in review (Daniel):** `extract_catch22` originally required `fs_hz`, which it can never
+  use. The uniform-signature argument is a **Protocol** concern — the registry calls providers
+  generically and cannot know which needs what — and does not apply to a public function that is
+  catch22-only by construction. Dropped.
+- **Same fix applied one level up.** `extract_all`'s `fs_hz` is now `float | None = None`, required
+  only when a requested feature actually needs it. `providers.REQUIRES_FS_HZ` is the public,
+  documented source of that fact (the three §2 spectral features), so the check is derived rather
+  than hardcoded, and the error **names the offending feature** — with a selection API, "why does
+  this need a sample rate?" is not obvious from a request of a dozen names. Backwards compatible:
+  existing callers pass `fs_hz` and are unaffected, verified by a test that a supplied-but-unused
+  `fs_hz` gives an identical frame. Behaviour change worth noting: forgetting `fs_hz` on the default
+  selection now raises `ValueError` naming the three features instead of a bare `TypeError`.
+- **Where an unused rate is passed internally, it is `NaN`,** not a plausible `1.0` — if a feature on
+  that path ever became rate-dependent, the result is visibly wrong rather than silently computed
+  against a made-up number.
+- **178 tests pass** (was 171); default output re-verified identical to HEAD after both changes.
 - **Depends on:** S5.
 
 ### S7 — Base-install guard + CI + cost measurement ☐ (est. 1.5–3 h)

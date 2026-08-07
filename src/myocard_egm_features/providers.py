@@ -73,6 +73,7 @@ __all__ = [
     "CATCH22_EXTRA_HINT",
     "HIGUCHI_K_MAX",
     "LZ_BINARIZE_METHOD",
+    "REQUIRES_FS_HZ",
     "SAMPLE_ENTROPY_M",
     "SAMPLE_ENTROPY_R_FRAC",
     "SEC_PEAK_THRESHOLD_FRAC",
@@ -86,9 +87,23 @@ __all__ = [
     "validate_selection",
 ]
 
-#: The three native features that read the power spectrum. Grouped so the
-#: shared periodogram is computed only when one of them is actually requested.
-_FREQUENCY_NAMES = frozenset({"spectral_centroid", "spectral_entropy", "dominant_frequency"})
+#: The features that need the ``fs_hz`` **argument** to be computed at all —
+#: the three native ones that read the power spectrum, whose values are in Hz.
+#: Grouped so the shared periodogram is computed only when one is requested,
+#: and exposed so a caller can tell whether it needs a sample rate before
+#: supplying one.
+#:
+#: **Not the same as "the rate-sensitive features."** Every catch22 feature is
+#: defined in samples and lags, so none appears here — but ``forecast_error``
+#: looks three samples ahead, which is 3 ms at 1 kHz and 6 ms at 500 Hz, and
+#: the autocorrelation timescales measure lags in samples. Those values are
+#: still only comparable between datasets recorded at one rate; they simply do
+#: not take the argument. See ``docs/theory.md`` "Preprocessing assumptions".
+REQUIRES_FS_HZ: frozenset[str] = frozenset(
+    {"spectral_centroid", "spectral_entropy", "dominant_frequency"}
+)
+
+_FREQUENCY_NAMES = REQUIRES_FS_HZ
 
 
 def validate_selection(
