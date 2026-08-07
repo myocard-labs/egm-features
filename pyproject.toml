@@ -78,6 +78,18 @@ dev = [
   "nbstripout>=0.7",
 ]
 
+# The catch22 feature set (docs/theory.md §4) is OPTIONAL. It is the one
+# dependency that is not pure Python: pycatch22 publishes no wheels, so pip
+# builds it from source and a C compiler must be present. Keeping it out of
+# the base install means the core eleven features stay installable anywhere,
+# and only consumers that want the comparison-feature set pay for a toolchain.
+#
+# Floored, not pinned: this is a runtime dependency, and the fleet convention
+# is floors only for those (the numpy cap above is a documented exception).
+catch22 = [
+  "pycatch22>=0.4.5",
+]
+
 [project.urls]
 Homepage      = "https://github.com/myocard-labs/egm-features"
 Repository    = "https://github.com/myocard-labs/egm-features"
@@ -200,5 +212,9 @@ module = [
   "scipy.*",
   "antropy.*",
   "pandas.*",
+  # pycatch22 is a C extension with no py.typed marker and no stubs. It is
+  # also an optional extra, so it is legitimately absent from a base install
+  # and mypy must not fail when it cannot be found.
+  "pycatch22.*",
 ]
 ignore_missing_imports = true

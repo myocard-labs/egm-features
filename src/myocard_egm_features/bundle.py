@@ -21,12 +21,17 @@ group don't pay for the others (sample_entropy in particular is
 ~O(T²) and slow). ``extract_all`` is a thin wrapper that calls all
 three and concatenates.
 
-**Project-standard policy values** are hardcoded inside ``extract_all``
+**Project-standard policy values** are applied inside ``extract_all``
 (and the per-module helpers that need them). Direct callers of the
 per-feature functions are forced to think about which policy they
-want — preventing accidental drift across the codebase. The standards
-live as module-level constants below with cross-references to the
-``docs/theory.md`` sections that justify them.
+want — preventing accidental drift across the codebase.
+
+Those constants now live in :mod:`providers`, which is where the code
+that applies them lives; they are re-exported here under their original
+names, so ``bundle.ACTIVATION_METHOD`` and friends remain part of the
+public API unchanged. The import runs one way only — ``bundle`` imports
+``providers``, never the reverse — which keeps the feature-set registry
+out of an import cycle.
 
 See ``project/architecture.md`` "Defaults policy — math constants vs
 project-policy values" for the rationale.
@@ -39,6 +44,15 @@ import pandas as pd
 from numpy.typing import NDArray
 
 from myocard_egm_features import complexity, frequency, time_domain
+from myocard_egm_features.providers import (
+    ACTIVATION_METHOD,
+    HIGUCHI_K_MAX,
+    LZ_BINARIZE_METHOD,
+    SAMPLE_ENTROPY_M,
+    SAMPLE_ENTROPY_R_FRAC,
+    SEC_PEAK_THRESHOLD_FRAC,
+    SHANNON_ENTROPY_N_BINS,
+)
 
 __all__ = [
     "ACTIVATION_METHOD",
@@ -53,48 +67,6 @@ __all__ = [
     "extract_frequency",
     "extract_time_domain",
 ]
-
-# ---------------------------------------------------------------------------
-# Project-standard policy values — see docs/theory.md and architecture.md.
-# These are the "required policy" arguments hardcoded by the bundle so
-# downstream consumers (notebooks, egm-studio, the v1_baseline diagnostic)
-# all use the same standard without re-deciding per call site.
-# ---------------------------------------------------------------------------
-
-#: Activation-time convention for :func:`time_domain.activation_position`.
-#: Clinical default (Marchlinski / Wittkampf school); see ``docs/theory.md`` §1.3.
-ACTIVATION_METHOD: str = "dvdt_max"
-
-#: Prominence threshold (fraction of primary peak amplitude) for
-#: :func:`time_domain.sec_peak_count`. See ``docs/theory.md`` §1.4.
-SEC_PEAK_THRESHOLD_FRAC: float = 0.3
-
-#: Binarization rule for :func:`complexity.lempel_ziv_complexity`. Robust to
-#: baseline drift; see ``docs/theory.md`` §3.3.
-LZ_BINARIZE_METHOD: str = "median"
-
-# ---------------------------------------------------------------------------
-# Math-default constants — documented here for visibility even though they
-# already live as kwargs defaults on the individual feature functions. The
-# bundle re-states them so a reviewer can see, in one place, every numeric
-# choice the standard 11-feature extraction uses.
-# ---------------------------------------------------------------------------
-
-#: Embedding dimension for :func:`complexity.sample_entropy`. Standard
-#: Pincus 1991 / Richman 2000 choice; see ``docs/theory.md`` §3.1.
-SAMPLE_ENTROPY_M: int = 2
-
-#: Tolerance fraction for :func:`complexity.sample_entropy`. Standard
-#: Pincus 1991 choice; see ``docs/theory.md`` §3.1.
-SAMPLE_ENTROPY_R_FRAC: float = 0.2
-
-#: Histogram bin count for :func:`complexity.shannon_entropy`. Sturges' rule
-#: for T=512; see ``docs/theory.md`` §3.2.
-SHANNON_ENTROPY_N_BINS: int = 10
-
-#: Maximum scale for :func:`complexity.higuchi_fractal_dimension`. Pragmatic
-#: literature mid-range; see ``docs/theory.md`` §3.4.
-HIGUCHI_K_MAX: int = 10
 
 # ---------------------------------------------------------------------------
 # Column ordering — matches ``docs/theory.md`` section order so a reader

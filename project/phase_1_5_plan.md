@@ -162,6 +162,32 @@ trace length: `T ≡ 0 (mod 64)` for CLF3's MobileViT, so the 150–250 ms targe
    **indicative only**. The §8.2 feature-responsiveness screening on actual banks is the instrument
    that decides the set — this just says what to look for. Raised to the project-lead as CL-047.
 
+**D13 · The caller chooses which shipped features get computed.** *(Daniel, 2026-08-06, after
+reviewing S2.)* `features=` on `FeatureProvider.extract`: a provider must not compute what nobody
+asked for. `features=None` keeps meaning "all of them", so every existing call is unchanged.
+
+This is a **performance contract**, and the right way to honour it differs per provider — the
+native eleven are independent calls, so skipping is a real saving; catch22 gets all 22 from one C
+call, so the cheapest way to serve a subset is compute-all-then-filter (D4 unchanged). Each
+provider decides; callers just ask.
+
+Measured at `T = 192`: all eleven native features cost **0.68 ms/trace**, of which
+`shannon_entropy` is 0.34 and the shared periodogram 0.14. Requesting one cheap feature is now
+**~154×** cheaper, and a time-domain-only selection skips the periodogram entirely.
+
+**Corrects a documented assumption:** `roadmap.md` has said since v0.1.0 that `sample_entropy` is
+the extraction bottleneck. True at `T = 512`, where its O(T²) dominates — but at 192 it is 14% of
+the cost and `shannon_entropy` is 3.5× more expensive. Fixed at S8.
+
+> **Withdrawn, same day.** A first pass also built a `UserDefinedProvider` accepting *user-supplied
+> callables*, on a misreading of "user-defined feature set" — Daniel meant the user selects among
+> the features we already ship, which is what `features=` does. The plugin mechanism was removed
+> before it shipped, along with the reproducibility problem it created (a callable with no
+> theory.md entry, no test anchor, and no recorded policy makes an STU5 result that cannot be
+> regenerated from the repos). Escalated as CL-138, **withdrawn as CL-139**; no §3 or §9 change is
+> needed. Recorded because the reasoning is worth not re-deriving: **every feature this library can
+> compute has a documented definition and a test anchor, and that is a property worth keeping.**
+
 **Named sets shipped** (per `parameter_estimator_design.md` B.3) — membership **provisional** pending
 the §8.2 screening (B.3 requires it; D12 gives it a shortlist to check first):
 
@@ -226,25 +252,52 @@ states its verification. ☐ todo · 🔨 wip · ✅ done.
   comparability with Phase-1 banks. Documented in the Notation section; **route to the project-lead if
   we want them re-derived at 192**, since it would be a feature-value change consumers see.
 
-### S2 — Optional extra + provider seam ☐ (est. 1.5–3 h)
+### S2 — Optional extra + provider seam ✅ (est. 1.5–3 h)
 
 - **Change:** `pyproject.toml` gains `[project.optional-dependencies] catch22 = ["pycatch22>=0.4.5"]`
   (base dependencies untouched) plus a mypy `ignore_missing_imports` override — no py.typed upstream.
   New `src/myocard_egm_features/providers.py`: the `FeatureProvider` Protocol, `NativeProvider`
-  wrapping the existing 11, and `Catch22Provider` with a lazy import and an ImportError message that
-  names the extra (`pip install "myocard-egm-features[catch22]"`) and the build-tools requirement.
-- **Verify:** `NativeProvider.available()` is unconditionally true; `Catch22Provider.available()`
-  reflects the import; the ImportError text is asserted (it is user-facing UX, not an internal
-  detail).
+  wrapping the existing 11, and the dependency gate — `require_pycatch22()` / `pycatch22_available()`
+  — carrying the ImportError message that names the extra and the build-tools requirement.
+- **Scope change (deliberate):** `Catch22Provider` itself moves to **S3**, alongside the
+  `catch22.py` module it wraps. Shipping the class here would mean a stub with no `feature_names`
+  and no `extract`, since both need the S3 name map — an untestable half-class. The *dependency*
+  concern (which is what S2 is really about) lands here in full and is tested now; the provider
+  class lands when there is something for it to delegate to. No net change to the step count.
+- **Also (unplanned, necessary):** the seven project-standard policy constants **moved** from
+  `bundle.py` to `providers.py`, where the code that applies them now lives. `bundle` re-exports
+  them under their original names, so `bundle.ACTIVATION_METHOD` and friends stay public API
+  unchanged. This is what keeps the import graph acyclic: `bundle → providers` and
+  `sets → providers`, never the reverse — without the move, S6's `bundle → sets → providers →
+  bundle` would be a cycle. Architecture.md's "constants live in bundle.py" line is corrected at S8.
+- **Verify:** ✅ `NativeProvider` satisfies the Protocol via `isinstance`; `available()` is
+  unconditionally true; provider output **matches `bundle.extract_all` value-for-value** (the test
+  that catches policy-constant drift); the ImportError text is asserted against a simulated base
+  install, including that the original cause is chained; the 11 native features still work with
+  `pycatch22` unimportable. **87 tests pass** (was 76), ruff clean, **`src/` mypy-clean**.
+- **Caught in review:** two native features (`zero_crossings`, `sec_peak_count`) return `int`, not
+  `float`. Coercing them in the provider would have flipped those bundle columns from `int64` to
+  `float64` for every existing consumer — a breaking change disguised as a refactor. The Protocol
+  now documents `float` as the PEP-484 numeric tower rather than a runtime guarantee, and a test
+  pins both the `int` returns and the `int64` column dtypes.
+- **Added after review (D13):** `features=` selection on the Protocol and on `NativeProvider` —
+  computing only what was asked, and computing the shared periodogram only if a frequency feature is
+  wanted. Verified: selection returns **documentation order, not caller order**; every selected value
+  equals its full-extraction value; **the expensive call is not made when unrequested** (asserted on
+  *invocation* rather than timing, so it cannot go flaky); the periodogram is computed exactly once
+  for the three frequency features; an unknown name raises rather than silently narrowing the
+  comparison. **92 tests pass** (was 87).
 - **Depends on:** S1.
 
-### S3 — `catch22.py` batch primitive + name mapping ☐ (est. 1–2 h)
+### S3 — `catch22.py` batch primitive + name mapping + `Catch22Provider` ☐ (est. 1–2 h)
 
 - **Change:** `HCTSA_TO_NAME` (D5) and `catch22_all(signal, *, catch24=False) -> dict[str, float]` —
   ndarray→list at the boundary (D6), keyed by **our** names via the hctsa codes, one C call for the
   full set (D4).
   Also the per-call `NaN` detection D7a needs (return which features were `NaN`, don't warn here —
-  the batch layer aggregates).
+  the batch layer aggregates). **Plus `Catch22Provider`** in `providers.py`, deferred from S2:
+  `feature_names` from `HCTSA_TO_NAME`, `available()` delegating to `pycatch22_available()`, and
+  `extract` calling `catch22_all` and ignoring `fs_hz` per the uniform signature.
 - **Verify:** a test asserting `HCTSA_TO_NAME` maps `SP_Summaries_welch_rect_area_5_1` →
   `low_freq_power` and `..._centroid` → `centroid_freq`, with the two-sine discriminating case from
   D5 as the evidence — this is the regression guard against pycatch22's crossed labels. Plus: 22/24
