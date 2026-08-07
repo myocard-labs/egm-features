@@ -14,10 +14,13 @@ import numpy as np
 import pytest
 
 from myocard_egm_features import bundle, providers
+from myocard_egm_features.catch22 import catch22_all
 from myocard_egm_features.providers import (
     CATCH22_EXTRA_HINT,
+    Catch22Provider,
     FeatureProvider,
     NativeProvider,
+    nan_feature_names,
     pycatch22_available,
     require_pycatch22,
 )
@@ -258,3 +261,109 @@ def test_unknown_feature_name_raises(trace: np.ndarray) -> None:
     """A typo must fail, not silently narrow the comparison."""
     with pytest.raises(ValueError, match="does not provide"):
         NativeProvider().extract(trace, fs_hz=FS_HZ, features=["peak_to_pea"])
+
+
+# ---------------------------------------------------------------------------
+# Catch22Provider
+# ---------------------------------------------------------------------------
+
+catch22_only = pytest.mark.skipif(
+    not pycatch22_available(), reason="optional catch22 extra not installed"
+)
+
+
+def test_catch22_provider_satisfies_the_protocol() -> None:
+    assert isinstance(Catch22Provider(), FeatureProvider)
+
+
+def test_catch22_provider_names_are_known_without_the_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """feature_names must work even when available() is False.
+
+    A caller has to be able to ask what *would* be computed before deciding
+    whether installing a C toolchain is worth it.
+    """
+    real_import = builtins.__import__
+
+    def _no_pycatch22(name: str, *args: object, **kwargs: object) -> object:
+        if name == "pycatch22":
+            raise ImportError("No module named 'pycatch22'")
+        return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(builtins, "__import__", _no_pycatch22)
+    provider = Catch22Provider()
+    assert provider.available() is False
+    assert len(provider.feature_names) == 24
+    assert provider.feature_names[0] == "mode_5"
+
+
+@catch22_only
+def test_catch22_provider_computes_only_the_requested_features(
+    monkeypatch: pytest.MonkeyPatch, trace: np.ndarray
+) -> None:
+    """The whole point of selection: unrequested math must not run.
+
+    pycatch22's bundled entry point carries no discount over its individual
+    ones, so asking for three features must invoke three, not twenty-two.
+    Asserted on invocation rather than timing, so it cannot go flaky.
+    """
+    from myocard_egm_features import catch22 as catch22_module
+
+    called: list[str] = []
+    real = catch22_module.require_pycatch22()
+
+    class _Spy:
+        def __getattr__(self, code: str) -> object:
+            called.append(code)
+            return getattr(real, code)
+
+    monkeypatch.setattr(catch22_module, "require_pycatch22", lambda: _Spy())
+
+    out = Catch22Provider().extract(
+        trace, fs_hz=FS_HZ, features=["trev", "mode_5", "entropy_pairs"]
+    )
+    assert sorted(called) == sorted(
+        ["CO_trev_1_num", "DN_HistogramMode_5", "SB_MotifThree_quantile_hh"]
+    )
+    # Documentation order, not the order the caller listed them in.
+    assert tuple(out) == ("mode_5", "trev", "entropy_pairs")
+
+
+@catch22_only
+def test_catch22_provider_agrees_with_the_module(trace: np.ndarray) -> None:
+    direct = catch22_all(trace, catch24=True)
+    via_provider = Catch22Provider().extract(trace, fs_hz=FS_HZ)
+    assert via_provider == direct
+
+
+@catch22_only
+def test_catch22_provider_ignores_fs_hz(trace: np.ndarray) -> None:
+    """Accepted for a uniform signature; these features are defined in samples."""
+    at_1k = Catch22Provider().extract(trace, fs_hz=1000.0)
+    at_500 = Catch22Provider().extract(trace, fs_hz=500.0)
+    assert at_1k == at_500
+
+
+@catch22_only
+def test_catch22_provider_rejects_an_unknown_name(trace: np.ndarray) -> None:
+    with pytest.raises(ValueError, match="does not provide"):
+        Catch22Provider().extract(trace, fs_hz=FS_HZ, features=["trevv"])
+
+
+# ---------------------------------------------------------------------------
+# NaN detection (the input to the batch-level warning, D7a)
+# ---------------------------------------------------------------------------
+
+
+def test_nan_feature_names_reports_only_nan_entries() -> None:
+    assert nan_feature_names({"a": 1.0, "b": float("nan"), "c": 3.0}) == ("b",)
+    assert nan_feature_names({"a": 1.0}) == ()
+    # inf is a value, not a missing one — it must not be reported.
+    assert nan_feature_names({"a": float("inf")}) == ()
+
+
+@catch22_only
+def test_nan_detection_on_a_real_degenerate_trace() -> None:
+    values = Catch22Provider().extract(np.ones(T), fs_hz=FS_HZ)
+    assert len(nan_feature_names(values)) == 19

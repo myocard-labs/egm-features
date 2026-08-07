@@ -1014,34 +1014,50 @@ its lean numpy/scipy/pandas/antropy footprint.
 #### 4.1.2 Naming — the hctsa code is the source of truth
 
 catch22 features have two names: the original `hctsa` code
-(`SP_Summaries_welch_rect_centroid`) and a short name (`centroid_freq`).
-We use short names as our column names, and we maintain **our own**
-mapping from hctsa code to short name.
+(`SP_Summaries_welch_rect_centroid`) and a short name (`centroid_freq`). We
+use short names as our column names, and we key every lookup off the **hctsa
+code**, maintaining our own code → name mapping rather than consuming
+`pycatch22`'s `short_names` list.
 
-**That is not paranoia — the library's own short-name list is wrong for
-two features.** `pycatch22.catch22_all(..., short_names=True)` returns a
-list in which `centroid_freq` and `low_freq_power` are **crossed**
-relative to the hctsa codes they are paired with. Checked against signals
-where the answer is unarguable ($T = 192$, $f_s = 1000$ Hz):
+**This is not because that list is wrong.** It is correct, and our mapping
+agrees with it for 22 of the 24 features. We keep our own for three narrower
+reasons:
 
-| signal | `..._welch_rect_area_5_1` | `..._welch_rect_centroid` |
+1. **Two names we deliberately choose differently.** `pycatch22` calls
+   `SB_TransitionMatrix_3ac_sumdiagcov` → `transition_matrix`, which names the
+   *object* rather than the statistic — the feature is the summed column
+   variance of that matrix, so we call it `transition_variance`. And it calls
+   `DN_Spread_Std` → `SD`, which is terse to the point of ambiguity next to a
+   column called `std_dev`.
+2. **Documentation order.** This section is organised by the eight Fulcher-lab
+   families; `pycatch22` returns features in a different order entirely. Our
+   mapping is declared in §4 order so a feature DataFrame reads left-to-right
+   the way this document reads top-to-bottom.
+3. **A stable key.** The hctsa codes are the canonical identifiers and change
+   only if the feature itself changes, whereas a convenience label could be
+   renamed upstream without ceremony. Keying off the code means an upstream
+   rename cannot silently re-point one of our columns at a different statistic.
+
+A test asserts that every code `pycatch22` returns is one we map, so a change
+to the upstream feature set fails loudly instead of producing a silently
+different comparison space.
+
+**Verifying a name against physics, not a table.** Where the two spectral
+features are concerned it is worth checking the mapping directly rather than
+trusting any label. A 50 Hz sine at $f_s = 1000$ Hz has a median frequency of
+$2\pi \cdot 50 / 1000 = 0.3142$ rad/sample, and essentially all of its power
+below $0.2 f_{Ny}$. Measured:
+
+| hctsa code | value on a 50 Hz sine | therefore |
 |---|---|---|
-| 3-cycle sine (very low frequency) | 0.998 | 0.037 |
-| 200-cycle sine (very high frequency) | 0.000 | 2.454 |
-| 50 Hz sine | 0.992 | **0.3191** |
+| `SP_Summaries_welch_rect_centroid` | **0.3191** | the **median frequency**, in rad/sample → `centroid_freq` |
+| `SP_Summaries_welch_rect_area_5_1` | **0.9920** | the **low-frequency power fraction** → `low_freq_power` |
 
-The 50 Hz row settles it: $2\pi \cdot 50 / 1000 = 0.3142$ rad/sample, so
-`..._centroid` is returning the **median frequency in rad/sample**, and
-`..._area_5_1` is the **fraction of power in the lowest 20% of
-frequencies** — the reverse of the labels the library hands back, and
-matching the Fulcher-lab documentation.
-
-Taking those labels at face value would have compared a median frequency
-on synthetic against a power fraction on IAFDB under one column name — a
-wrong answer with no error raised. So: **we key every lookup off the hctsa
-code**, never off `short_names`, and a test pins the mapping. Two further
-names we set ourselves rather than inherit: `transition_variance`
-(`pycatch22` says `transition_matrix`) and `std_dev` (it says `SD`).
+Both agree with the Fulcher-lab documentation and with `pycatch22`'s own short
+names. The check is recorded because the two features are easy to confuse by
+name alone — `centroid` and `area` both sound like they could be either — and
+confusing them would compare a median frequency on one dataset against a power
+fraction on another under a single column label, with nothing raised.
 
 #### 4.1.3 Reliability at T = 192, and the usable-now set
 
@@ -1374,9 +1390,10 @@ power in half.
 **What it shows.** Where the spectral mass sits. High → fast morphology.
 
 **Worked anchors.** `sine50` → $0.3191$ against the exact
-$2\pi \cdot 50/1000 = 0.3142$ — this is the anchor that proves the naming
-correction in [§4.1.2](#412-naming--the-hctsa-code-is-the-source-of-truth).
-`white` → $1.3990$, near the $\pi/2 \approx 1.571$ a flat spectrum implies.
+$2\pi \cdot 50/1000 = 0.3142$ — the anchor that confirms this feature really is
+the median frequency, and in rad/sample, per
+[§4.1.2](#412-naming--the-hctsa-code-is-the-source-of-truth). `white` →
+$1.3990$, near the $\pi/2 \approx 1.571$ a flat spectrum implies.
 
 > **Not interchangeable with our `spectral_centroid` (§2.2).** Ours is the
 > power-weighted **mean** in Hz; this is the **median** in rad/sample. On a
@@ -1993,7 +2010,7 @@ registered but neither is in a default set.
   [time-series-features.gitbook.io/catch22](https://time-series-features.gitbook.io/catch22/information-about-catch22/feature-descriptions/feature-overview-table)
   — per-feature descriptions and the hctsa↔catch22 name mapping; the
   authority [§4.1.2](#412-naming--the-hctsa-code-is-the-source-of-truth)'s
-  naming correction is checked against.
+  mapping is checked against.
 - **Welch PD.** *The use of fast Fourier transform for the estimation of
   power spectra.* IEEE Trans Audio Electroacoust 1967;15:70.
   [doi:10.1109/TAU.1967.1161901](https://doi.org/10.1109/TAU.1967.1161901)

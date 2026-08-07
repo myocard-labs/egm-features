@@ -53,14 +53,20 @@ keeps the registry (which also imports ``providers``) out of an import cycle.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from types import ModuleType
+from collections.abc import Mapping, Sequence
 from typing import Protocol, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
 
 from myocard_egm_features import complexity, frequency, time_domain
+from myocard_egm_features.catch22 import (
+    CATCH22_EXTRA_HINT,
+    CATCH24_NAMES,
+    catch22_features,
+    pycatch22_available,
+    require_pycatch22,
+)
 
 __all__ = [
     "ACTIVATION_METHOD",
@@ -71,8 +77,10 @@ __all__ = [
     "SAMPLE_ENTROPY_R_FRAC",
     "SEC_PEAK_THRESHOLD_FRAC",
     "SHANNON_ENTROPY_N_BINS",
+    "Catch22Provider",
     "FeatureProvider",
     "NativeProvider",
+    "nan_feature_names",
     "pycatch22_available",
     "require_pycatch22",
     "validate_selection",
@@ -140,67 +148,6 @@ SHANNON_ENTROPY_N_BINS: int = 10
 #: Maximum scale for :func:`complexity.higuchi_fractal_dimension`. Pragmatic
 #: literature mid-range; see ``docs/theory.md`` §3.4.
 HIGUCHI_K_MAX: int = 10
-
-
-# ---------------------------------------------------------------------------
-# The optional catch22 dependency
-# ---------------------------------------------------------------------------
-
-#: Shown when catch22 features are requested without the extra installed.
-#: Names both the fix and the C-toolchain requirement, because pycatch22
-#: publishes no wheels and the pip failure that follows a missing compiler is
-#: considerably less legible than this message.
-CATCH22_EXTRA_HINT = (
-    "catch22 features require the optional 'catch22' extra, which is not installed.\n"
-    '    pip install "myocard-egm-features[catch22]"\n'
-    "pycatch22 publishes no wheels, so pip builds it from source: a C compiler "
-    "must be available (build-essential on Debian/Ubuntu).\n"
-    "The eleven native features in docs/theory.md §1-§3 need no extra and are "
-    "always available."
-)
-
-
-def require_pycatch22() -> ModuleType:
-    """Import and return ``pycatch22``, or raise with an actionable message.
-
-    Deliberately performs a real import rather than checking for the module
-    spec: a half-built C extension is present on disk but fails to import, and
-    the point of this function is to fail *legibly* in exactly that case.
-
-    Returns
-    -------
-    ModuleType
-        The imported ``pycatch22`` module.
-
-    Raises
-    ------
-    ImportError
-        If the extra is not installed or the extension will not import. The
-        message is :data:`CATCH22_EXTRA_HINT`; the original error is chained.
-    """
-    try:
-        import pycatch22
-    except ImportError as exc:  # pragma: no cover - exercised in the base-install CI job
-        raise ImportError(CATCH22_EXTRA_HINT) from exc
-
-    # pycatch22 ships no stubs, so ``ignore_missing_imports`` types it as Any.
-    # Binding it to a declared name keeps the return type honest — returning
-    # the import directly would leak Any to every caller under strict mode.
-    module: ModuleType = pycatch22
-    return module
-
-
-def pycatch22_available() -> bool:
-    """Whether the optional catch22 extra can actually be used here.
-
-    Never raises — this is the question a caller asks *before* deciding to
-    request catch22 features.
-    """
-    try:
-        require_pycatch22()
-    except ImportError:
-        return False
-    return True
 
 
 # ---------------------------------------------------------------------------
@@ -384,3 +331,65 @@ class NativeProvider:
             )
         # Documentation order, restricted to what was asked for.
         return {name: out[name] for name in self.feature_names if name in out}
+
+
+class Catch22Provider:
+    """The 22 catch22 features plus the catch24 pair — ``docs/theory.md`` §4.
+
+    Available only when the optional ``catch22`` extra is installed. Offers all
+    24 names; the project's *default* feature sets exclude ``mean`` and
+    ``std_dev``, because ``peak_to_peak`` (§1.1) is the clinically-calibrated
+    amplitude statistic and a bandpassed EGM's mean is near zero by
+    construction — but a caller wanting canonical catch24 can ask for them.
+    """
+
+    name = "catch22"
+
+    #: All 24, in ``docs/theory.md`` §4 documentation order.
+    feature_names: tuple[str, ...] = CATCH24_NAMES
+
+    def available(self) -> bool:
+        """Whether the optional extra is installed and importable."""
+        return pycatch22_available()
+
+    def extract(
+        self,
+        signal: NDArray[np.floating],
+        *,
+        fs_hz: float,
+        features: Sequence[str] | None = None,
+    ) -> dict[str, float]:
+        """Compute the requested catch22 features for one trace.
+
+        Computes **only** what was asked for, the same as
+        :class:`NativeProvider`. ``pycatch22`` exposes each feature as its own
+        entry point, and its bundled ``catch22_all`` carries no discount — it
+        is a loop over those same functions. Measured at ``T = 192``: 22
+        bundled cost 0.373 ms, 22 individually cost 0.368 ms, one feature costs
+        0.003 ms. Selection is therefore a straight win at every size, with no
+        crossover to reason about.
+
+        ``fs_hz`` is accepted and unused — these features are defined in
+        samples and lags, not Hz. That does *not* make them sample-rate
+        independent; see the module docstring.
+        """
+        wanted = validate_selection(features, self.feature_names, self.name)
+        if not wanted:
+            return {}
+        return catch22_features(signal, [n for n in self.feature_names if n in wanted])
+
+
+def nan_feature_names(values: Mapping[str, float]) -> tuple[str, ...]:
+    """Which entries came back ``NaN``, in the order given.
+
+    The detection half of the warn-on-degenerate-input policy
+    (``docs/theory.md`` §4.1.4). It lives here rather than in :mod:`catch22`
+    because the native features can produce ``NaN`` too, and a batch caller
+    wants one answer across whatever providers it used.
+
+    Deliberately does **not** warn. A per-trace warning would fire thousands of
+    times on a bad channel and slow the loop it is trying to report on; the
+    batch layer aggregates these into a single message naming how many traces
+    and which features were affected.
+    """
+    return tuple(name for name, value in values.items() if value != value)

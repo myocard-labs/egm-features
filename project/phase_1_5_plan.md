@@ -66,34 +66,63 @@ Expressing the existing 11 as a provider too costs almost nothing and is what le
 (S5) compose uniformly instead of special-casing. This is the seam the project-lead asked for: the
 swap point is one class.
 
-**D4 · Compute the full catch22 set, then select — never cherry-pick for performance.**
-*(project-lead.)* `catch22_all` computes all 22/24 in a single C call, so the batch path always
-computes the full set and slices our subset (skip self-affine, defer linear-autocorrelation) out of
-the result. The 24 named per-feature wrappers (S4) still delegate to the individual
-`pycatch22.<CODE>` functions — that is the correct and cheapest path for a genuine *single-feature*
-call, and it is where the theory-doc anchors and docstrings live per this repo's "every feature is a
-function" principle — but **no batch or selection path may assemble its output from them**. S6
-enforces this.
+**D4 · Compute only the requested catch22 features.** *(Revised 2026-08-06, Daniel — supersedes the
+project-lead's compute-all-then-filter rule.)* Every path computes exactly what was asked for, via
+`pycatch22`'s **individual** per-feature entry points.
 
-**D5 · Maintain our own short-name mapping — do NOT use `pycatch22`'s `short_names`.** This is the
-one real trap. `pycatch22.catch22_all(..., short_names=True)` returns a short-name list in which
-**two labels are crossed relative to their hctsa codes**:
+> **What the original rule said, and why it no longer holds.** The project-lead's D4 was "never
+> cherry-pick for performance — `catch22_all` computes all 22/24 in one C call, so compute the full
+> set and slice." The premise was that the bundle is cheaper than its parts. **Measured at
+> `T = 192`, it is not:** the bundled call costs **0.373 ms** and calling all 22 individually costs
+> **0.368 ms** — parity, because `catch22_all` is simply a loop over the same functions. There is no
+> bulk discount to preserve, so cost scales with how many features you ask for:
+>
+> | features | individual | vs bundled |
+> |---|---|---|
+> | 1 | 0.003 ms | 0.01× |
+> | 3 | 0.016 ms | 0.04× |
+> | 6 | 0.086 ms | 0.23× |
+> | **14** (usable-now set) | 0.164 ms | **0.44×** |
+> | 22 | 0.368 ms | 0.99× |
+>
+> End-to-end through `Catch22Provider`: all 24 = 0.424 ms, the usable-now 14 = 0.229 ms (1.9×
+> cheaper), one feature = 0.012 ms (**35×** cheaper). This matters most exactly where Daniel
+> expected — if the §8.2 screening finds only a handful of catch22 features carry signal for the
+> parameter-estimation study, every sweep afterwards pays a fraction of the full cost.
 
-| pycatch22 short name | hctsa code it is paired with | What that code actually computes |
-|---|---|---|
-| `centroid_freq` | `SP_Summaries_welch_rect_area_5_1` | power fraction in the lowest 20% of frequencies |
-| `low_freq_power` | `SP_Summaries_welch_rect_centroid` | median (centroid) frequency |
+**Equivalence is asserted, not assumed.** Values from the individual functions are identical to the
+bundled call — checked across all six anchor signals including the degenerate ones where 19 of 22
+return `NaN`, since a subtle divergence would be easiest to miss there. That test is what makes it
+safe to skip upstream's own entry point.
 
-Confirmed empirically on 2026-07-28 with two known signals: a 3-cycle sine gives
-`area_5_1 = 0.998`, `centroid = 0.037`; a 200-cycle sine gives `area_5_1 = 0.000`,
-`centroid = 2.454`. So `area_5_1` is the low-frequency power and `centroid` is the median
-frequency — the reverse of the labels pycatch22 hands back, and matching the Fulcher-lab table that
-`catch22_techniques_explained.md` follows. Taking those labels at face value would silently compare
-a *median frequency* on synthetic against a *power fraction* on IAFDB under one column name — a
-wrong STU5 answer with no error. Therefore: **key everything off the hctsa code** (or the individual
-`pycatch22.<CODE>` functions), keep our own `HCTSA_TO_NAME` mapping, and pin it with a test (S3).
-Our names also diverge for `transition_variance` (pycatch22: `transition_matrix`) and `std_dev`
-(pycatch22: `SD`), so we own the vocabulary regardless.
+`catch22_features(signal, names)` is therefore the only extraction path; `catch22_all` is a thin
+convenience wrapper asking for everything. Raised to the project-lead as **CL-141**, since D4 was
+their rule.
+
+**D5 · Key off the hctsa code, and maintain our own code → name mapping.**
+*(Corrected 2026-08-06 — see the retraction below.)* We use short names as column labels but resolve
+them from the stable hctsa codes, not from `pycatch22`'s `short_names` list. Three reasons, none
+dramatic: **two names we choose differently** (`transition_variance` rather than upstream's
+`transition_matrix`, since the feature is the summed column variance *of* that matrix; and
+`std_dev` rather than `SD`); **documentation order**, since `pycatch22` returns features in a
+different order than theory.md §4 presents them; and **a stable key**, because an hctsa code changes
+only when the feature does, whereas a convenience label could be renamed upstream and silently
+re-point a column. A test asserts every code upstream returns is one we map, so a feature-set change
+fails loudly.
+
+> **⚠ Retraction (2026-08-06).** D5 previously asserted that `pycatch22`'s `short_names` **crossed**
+> `centroid_freq` and `low_freq_power` relative to their hctsa codes, and called it "the one real
+> trap". **That was wrong.** Upstream's list is correct in both `catch24` modes; verified by
+> re-running the probe and by measurement (a 50 Hz sine gives `..._centroid = 0.3191` against an
+> exact 0.3142 rad/sample, and upstream labels that `centroid_freq` — correctly). The error was a
+> **transcription mistake reading my own probe output**, which then propagated into theory.md
+> §4.1.2, this plan, the S1/S2 commit messages, and coordination-log entries CL-014 and CL-046.
+> All have been corrected; the fleet correction is **CL-140**.
+>
+> **What was never wrong:** the mapping actually implemented. Our names agree with upstream on 22 of
+> 24, differing only in the two deliberate choices above, and every value the library returns was
+> and is correct. The bug was in the justification, not the code — which is precisely why the
+> replacement test verifies the mapping **against physics** rather than against a claim.
 
 **D6 · `pycatch22` rejects numpy arrays.** Verified: passing an `NDArray` raises
 `SystemError: … returned NULL without setting an exception`; the C bindings accept only a Python
@@ -289,7 +318,7 @@ states its verification. ☐ todo · 🔨 wip · ✅ done.
   comparison. **92 tests pass** (was 87).
 - **Depends on:** S1.
 
-### S3 — `catch22.py` batch primitive + name mapping + `Catch22Provider` ☐ (est. 1–2 h)
+### S3 — `catch22.py` batch primitive + name mapping + `Catch22Provider` ✅ (est. 1–2 h)
 
 - **Change:** `HCTSA_TO_NAME` (D5) and `catch22_all(signal, *, catch24=False) -> dict[str, float]` —
   ndarray→list at the boundary (D6), keyed by **our** names via the hctsa codes, one C call for the
@@ -300,8 +329,26 @@ states its verification. ☐ todo · 🔨 wip · ✅ done.
   `extract` calling `catch22_all` and ignoring `fs_hz` per the uniform signature.
 - **Verify:** a test asserting `HCTSA_TO_NAME` maps `SP_Summaries_welch_rect_area_5_1` →
   `low_freq_power` and `..._centroid` → `centroid_freq`, with the two-sine discriminating case from
-  D5 as the evidence — this is the regression guard against pycatch22's crossed labels. Plus: 22/24
+  D5 as the evidence — the guard that the two easily-confused spectral features are mapped to the
+  statistic they actually compute. Plus: 22/24
   key counts, a sine anchor, and constant-signal NaN behaviour (D7).
+- **Also moved (necessary):** the dependency gate (`CATCH22_EXTRA_HINT`, `require_pycatch22`,
+  `pycatch22_available`) moved from `providers.py` into `catch22.py`, where it conceptually belongs —
+  otherwise `providers → catch22 → providers` would be a cycle. `providers` re-exports all three, so
+  S2's public surface is unchanged and its tests still import from either module.
+- **Verify:** ✅ mapping checked **against physics** (a 50 Hz sine gives `centroid_freq` = 0.3191 vs
+  an exact 0.3142 rad/sample, `low_freq_power` = 0.9920, and a fast sine inverts both); our mapping
+  differs from upstream's in exactly the two deliberate places, so a third difference fails the
+  build; every hctsa code upstream returns is one we map; documentation order for both 22 and 24;
+  ndarray accepted where raw pycatch22 raises `SystemError`; non-1D rejected; **twelve theory.md §4
+  anchors** re-asserted; constant / `NaN` / `inf` input all give 19-of-22 `NaN` without raising; a
+  5-sample trace gives numbers, not `NaN` (documented sharp edge); `Catch22Provider` makes **one**
+  C call regardless of selection size (D4), ignores `fs_hz`, and reports its 24 names even when the
+  extra is absent; and — after Daniel's review — **selection computes only the requested features**,
+  asserted by spying on which `pycatch22` entry points were invoked, with equivalence to the bundled
+  call checked across all six anchor signals. **130 tests pass** (was 92).
+- **Correction made here:** D5's "crossed short names" claim was **wrong and is retracted** — see
+  D5. The shipped mapping was always correct; the justification was not. Fleet notified as CL-140.
 - **Depends on:** S2.
 
 ### S4 — The 24 named per-feature wrappers ☐ (est. 1–2 h)
@@ -360,7 +407,7 @@ states its verification. ☐ todo · 🔨 wip · ✅ done.
 - **Change:** `docs/usage.md` (new API + sets + the NaN policy + the measured costs),
   `README.md` (feature count, the `[catch22]` extra and its **build-tools requirement**),
   `project/architecture.md` (D1–D5 and D10 as durable rationale — the wrapper argument extended to
-  pycatch22, the provider seam and why it exists, the crossed-short-names trap, the
+  pycatch22, the provider seam and why it exists, the hctsa-code-as-key rule, the
   registry-vs-adapter boundary), `CHANGELOG.md` `[Unreleased]`, `roadmap.md` (drop the now-answered
   `features=[...]` open API question; re-file the Wittkampf upgrade + extra features as
   **watch-triggered**, per design §4), version → 0.2.0.
@@ -412,9 +459,9 @@ CI job (S2 + S7).
 ## Notes / decisions log
 
 - **2026-07-28** — Plan drafted. Pre-coding probe of `pycatch22` 0.4.5 established the
-  source-only distribution, D6 (rejects ndarray), D5 (**crossed `centroid_freq` / `low_freq_power`
-  short names** — the significant find), and D7 (19/22 NaN on constant input). D5 in particular would
-  have produced a silently wrong STU5 comparison had we trusted the library's own labels.
+  source-only distribution, D6 (rejects ndarray), and D7 (19/22 NaN on constant input). A fourth
+  claim from that probe — that upstream's `short_names` crossed two labels — was a misreading and
+  is **retracted**; see D5.
 - **2026-07-29** — **CL-041 applied** (chore, ahead of S1): `ci.yml` ruff install pinned
   `>=0.6.0` → `==0.15.17` and `.pre-commit-config.yaml` `rev: v0.6.9` → `v0.15.17`, per CL-024 §1
   (which adopted this repo's CL-014 recommendation fleet-wide). Verified at the pinned version:
