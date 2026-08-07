@@ -351,14 +351,29 @@ states its verification. ☐ todo · 🔨 wip · ✅ done.
   D5. The shipped mapping was always correct; the justification was not. Fleet notified as CL-140.
 - **Depends on:** S2.
 
-### S4 — The 24 named per-feature wrappers ☐ (est. 1–2 h)
+### S4 — Single-feature access ✅ (est. 1–2 h)
 
-- **Change:** One public function per feature in `catch22.py` (`mode_5`, `outlier_timing_pos`,
-  `trev`, …), each delegating to the corresponding `pycatch22.<HCTSA_CODE>`, typed
-  `NDArray -> float`, docstring carrying its theory.md §4 anchor in the house style. Single-feature
-  convenience path only — per D4, nothing batch-shaped consumes these.
-- **Verify:** each wrapper's output equals the matching entry from `catch22_all` on the same trace;
-  the sine / noise anchors from §4 hold.
+- **Scope change (Daniel, 2026-08-06):** planned as **24 named per-feature wrappers**
+  (`catch22.mode_5(x)`, `catch22.trev(x)`, …) mirroring how §1–§3 expose every feature. Shipped
+  instead as **one helper**, `catch22_feature(signal, name) -> float`.
+
+  **Both original justifications had evaporated by the time S4 came up.** The repo's stated reason
+  for per-feature wrappers (architecture.md, "Why wrap antropy") is that *the wrappers are the
+  parameter policy* — `sample_entropy`'s `m` and `r` are ours to choose, and pinning them in one
+  place is what stops two consumers computing differently-parameterised features under one column
+  name. **catch22 has no parameters to pin** (§4.1.1), so 24 wrappers would carry no policy. And the
+  second rationale — that individual calls were the cheap path for a single feature — was made
+  redundant by the D4 revision, since `catch22_features` already computes exactly what is asked
+  for. What remained was symmetry, 24 names on the public surface, and 24 docstrings duplicating
+  theory.md §4.
+- **Change:** `catch22_feature(signal, feature)` delegating to `catch22_features`, so a caller
+  writes `catch22_feature(x, "trev")` rather than `catch22_features(x, ["trev"])["trev"]`. The
+  extraction section of `catch22.py` gained a comment recording the asymmetry with §1–§3 and why it
+  is deliberate, so the next reader does not "fix" it.
+- **Verify:** ✅ the helper matches the full set **for all 24 features** (so the sugar cannot drift
+  on one nobody exercises); returns a bare `float`; propagates `NaN`; rejects an unknown name; and
+  **invokes exactly one `pycatch22` entry point**, asserted by spying rather than timing.
+  **135 tests pass** (was 130); ruff exit 0; no new mypy findings.
 - **Depends on:** S3.
 
 ### S5 — Feature-set registry ☐ (est. 1–2 h)

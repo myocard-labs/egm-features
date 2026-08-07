@@ -25,6 +25,7 @@ from myocard_egm_features.catch22 import (
     CATCH24_NAMES,
     HCTSA_TO_NAME,
     catch22_all,
+    catch22_feature,
     catch22_features,
     pycatch22_available,
     require_pycatch22,
@@ -294,3 +295,53 @@ def test_selection_rejects_an_unknown_name() -> None:
 
 def test_empty_selection_computes_nothing() -> None:
     assert catch22_features(_sine50(), []) == {}
+
+
+# ---------------------------------------------------------------------------
+# The single-feature helper
+# ---------------------------------------------------------------------------
+
+
+def test_single_feature_helper_matches_the_set() -> None:
+    """catch22_feature is sugar, not a second implementation.
+
+    Checked over every one of the 24 so the sugar cannot drift from the set on
+    some feature nobody happens to exercise.
+    """
+    signal = _biphasic()
+    full = catch22_all(signal, catch24=True)
+    for name in CATCH24_NAMES:
+        one = catch22_feature(signal, name)
+        assert (one == full[name]) or (one != one and full[name] != full[name]), name
+
+
+def test_single_feature_helper_returns_a_bare_float() -> None:
+    value = catch22_feature(_sine50(), "acf_first_min")
+    assert isinstance(value, float)
+    assert value == pytest.approx(10.0)  # §4.4.2, half the 20-sample period
+
+
+def test_single_feature_helper_propagates_nan() -> None:
+    assert catch22_feature(_constant(), "trev") != catch22_feature(_constant(), "trev")
+
+
+def test_single_feature_helper_rejects_an_unknown_name() -> None:
+    with pytest.raises(ValueError, match="not catch22 features"):
+        catch22_feature(_sine50(), "trevv")
+
+
+def test_single_feature_helper_computes_only_that_feature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One name in must mean one pycatch22 entry point called."""
+    called: list[str] = []
+    real = require_pycatch22()
+
+    class _Spy:
+        def __getattr__(self, code: str) -> object:
+            called.append(code)
+            return getattr(real, code)
+
+    monkeypatch.setattr(catch22, "require_pycatch22", lambda: _Spy())
+    catch22.catch22_feature(_sine50(), "trev")
+    assert called == ["CO_trev_1_num"]

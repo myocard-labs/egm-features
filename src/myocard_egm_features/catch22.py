@@ -55,6 +55,7 @@ __all__ = [
     "HCTSA_TO_NAME",
     "NAME_TO_HCTSA",
     "catch22_all",
+    "catch22_feature",
     "catch22_features",
     "pycatch22_available",
     "require_pycatch22",
@@ -197,6 +198,21 @@ def pycatch22_available() -> bool:
 
 # ---------------------------------------------------------------------------
 # Extraction
+#
+# Three entry points, narrowing: every feature (:func:`catch22_all`), a named
+# subset (:func:`catch22_features`), one (:func:`catch22_feature`). All three
+# compute exactly what was asked for and nothing else.
+#
+# Note the deliberate asymmetry with §1-§3, where each feature is its own
+# public function (``time_domain.peak_to_peak``, ``complexity.sample_entropy``,
+# …). That pattern exists because those wrappers *are* the project's parameter
+# policy — ``sample_entropy``'s m and r are ours to choose, and pinning them in
+# one place is what stops two consumers computing differently-parameterised
+# features under one column name (``project/architecture.md``, "Why wrap
+# antropy"). **catch22 has no parameters to pin** (§4.1.1), so 24 equivalent
+# wrappers would carry no policy, duplicate ``docs/theory.md`` §4 in their
+# docstrings, and add 24 names to the public surface for nothing but symmetry.
+# Selection by name covers the same ground.
 # ---------------------------------------------------------------------------
 
 
@@ -290,3 +306,42 @@ def catch22_all(
         ``NaN`` for degenerate input — see the module docstring.
     """
     return catch22_features(signal, CATCH24_NAMES if catch24 else CATCH22_NAMES)
+
+
+def catch22_feature(
+    signal: NDArray[np.floating],
+    feature: str,
+) -> float:
+    """Compute one catch22 feature for one trace.
+
+    The single-feature convenience over :func:`catch22_features`, so a caller
+    wanting one value writes ``catch22_feature(x, "trev")`` rather than
+    ``catch22_features(x, ["trev"])["trev"]``.
+
+    Costs what one feature costs — 0.003 ms at ``T = 192``, against 0.373 ms
+    for the whole set. If you want several, ask for them together: this reloads
+    nothing between calls, but each call re-converts the trace to a list, so
+    ``catch22_features`` is the cheaper way to get more than one.
+
+    Parameters
+    ----------
+    signal
+        1D trace of shape ``(T,)``.
+    feature
+        One of :data:`CATCH24_NAMES`. See ``docs/theory.md`` §4 for what each
+        one measures and its worked anchor.
+
+    Returns
+    -------
+    float
+        The feature value; ``NaN`` for degenerate input (§4.1.4).
+
+    Raises
+    ------
+    ImportError
+        If the optional extra is not installed.
+    ValueError
+        If ``signal`` is not one-dimensional, or ``feature`` is not a catch22
+        feature name.
+    """
+    return catch22_features(signal, [feature])[feature]
