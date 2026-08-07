@@ -42,7 +42,36 @@ CLI), see [`project/architecture.md`](../project/architecture.md).
   - [3.2 shannon_entropy](#32-shannon_entropy)
   - [3.3 lempel_ziv_complexity](#33-lempel_ziv_complexity)
   - [3.4 higuchi_fractal_dimension](#34-higuchi_fractal_dimension)
-- [4. References](#4-references)
+- [4. catch22 features](#4-catch22-features)
+  - [4.1 About the catch22 set](#41-about-the-catch22-set)
+    - [4.1.1 What catch22 is, and how it differs from §1–§3](#411-what-catch22-is-and-how-it-differs-from-13)
+    - [4.1.2 Naming — the hctsa code is the source of truth](#412-naming--the-hctsa-code-is-the-source-of-truth)
+    - [4.1.3 Reliability at T = 192, and the usable-now set](#413-reliability-at-t--192-and-the-usable-now-set)
+    - [4.1.4 Degenerate input — NaN, and why it must warn](#414-degenerate-input--nan-and-why-it-must-warn)
+    - [4.1.5 The anchor signals](#415-the-anchor-signals)
+  - [4.2 Distribution shape](#42-distribution-shape)
+    - [4.2.1 mode_5](#421-mode_5) · [4.2.2 mode_10](#422-mode_10)
+  - [4.3 Extreme-event timing](#43-extreme-event-timing)
+    - [4.3.1 outlier_timing_pos](#431-outlier_timing_pos) · [4.3.2 outlier_timing_neg](#432-outlier_timing_neg)
+  - [4.4 Linear autocorrelation structure](#44-linear-autocorrelation-structure)
+    - [4.4.1 acf_timescale](#441-acf_timescale) · [4.4.2 acf_first_min](#442-acf_first_min) · [4.4.3 periodicity](#443-periodicity)
+    - [4.4.4 low_freq_power](#444-low_freq_power) · [4.4.5 centroid_freq](#445-centroid_freq) · [4.4.6 ami_timescale](#446-ami_timescale)
+  - [4.5 Nonlinear autocorrelation](#45-nonlinear-autocorrelation)
+    - [4.5.1 trev](#451-trev) · [4.5.2 ami2](#452-ami2)
+  - [4.6 Simple forecasting](#46-simple-forecasting)
+    - [4.6.1 forecast_error](#461-forecast_error)
+  - [4.7 Incremental differences](#47-incremental-differences)
+    - [4.7.1 high_fluctuation](#471-high_fluctuation) · [4.7.2 whiten_timescale](#472-whiten_timescale)
+  - [4.8 Symbolic](#48-symbolic)
+    - [4.8.1 stretch_high](#481-stretch_high) · [4.8.2 stretch_decreasing](#482-stretch_decreasing)
+    - [4.8.3 entropy_pairs](#483-entropy_pairs) · [4.8.4 transition_variance](#484-transition_variance)
+  - [4.9 Self-affine scaling](#49-self-affine-scaling)
+    - [4.9.1 rs_range](#491-rs_range) · [4.9.2 dfa](#492-dfa)
+  - [4.10 Other](#410-other)
+    - [4.10.1 embedding_dist](#4101-embedding_dist)
+  - [4.11 The catch24 additions](#411-the-catch24-additions)
+    - [4.11.1 mean](#4111-mean) · [4.11.2 std_dev](#4112-std_dev)
+- [5. References](#5-references)
 
 ---
 
@@ -67,11 +96,49 @@ Because the input is post-bandpass, EGM traces are approximately
 per-trace mean; lempel_ziv_complexity's "zero" binarization mode also
 uses it).
 
+**One extra assumption for §4.** Every catch22 feature is computed on the
+$z$-scored trace, so it is blind to the signal's mean and amplitude by
+design — the whole voltage axis that clinical fibrosis mapping rests on
+(`peak_to_peak < 0.5 mV`) is invisible to it. That is *why* §4 is an
+addition to §1–§3 rather than a replacement: catch22 supplies morphology
+and dynamics, §1–§3 supply amplitude and activation. See
+[§4.1.1](#411-what-catch22-is-and-how-it-differs-from-13).
+
+Also: several §4 features are indexed in **samples or lags** rather than
+Hz (autocorrelation timescales, `whiten_timescale`, `embedding_dist`), and
+one — `forecast_error` — has a fixed 3-sample horizon. Their values are
+only comparable between two corpora sampled at the **same rate**, and
+nothing in the call signature carries `fs_hz` to warn you. Synthetic and
+IAFDB are both 1 kHz, and Phase 1.5 fixed that as a constraint: any rate
+change is both-sides-or-neither.
+
 ## Notation
 
 - $x \in \mathbb{R}^{T}$ — a single per-trace input; $T$ is the sample count.
-- $T$ — number of samples in the trace. Default 512 (matches the
-  egm-classifier v1 input length at 1 kHz = 512 ms).
+- $T$ — number of samples in the trace. **Phase 1.5 fixes $T = 192$**
+  (192 ms at 1 kHz): the §8.1 study put the single-beat window in the
+  150–250 ms range, and the classifier's 1-D MobileViT requires
+  $T \equiv 0 \pmod{64}$, so 192 is that range rounded onto the 64-grid.
+  Worked examples throughout §4 use $T = 192$.
+
+  **§1–§3 predate this change.** Their worked examples were written at
+  $T = 512$ and each states its own window length explicitly, so they
+  remain valid as illustrations — but two §1–§3 *parameter choices* were
+  justified by $T = 512$ and are worth re-reading at 192:
+
+  - `shannon_entropy`'s `n_bins = 10` (§3.2) came from Sturges' rule,
+    $1 + \log_2 T$, which gives $\approx 10$ at 512 but $\approx 9.6$ at
+    192. The value is unchanged for now — changing it would move every
+    `shannon_entropy` result and break comparability with Phase-1 banks —
+    but the stated justification is now approximate rather than exact.
+  - Frequency resolution (§2.1) is $f_s/T$, so it coarsens from
+    $\approx 2$ Hz at 512 to $\approx 5.2$ Hz at 192. `spectral_centroid`
+    and `dominant_frequency` are correspondingly less precise on
+    Phase-1.5 traces; `dominant_frequency`, which reports a single bin
+    centre, is the more affected of the two.
+- $\tilde{x}_i = (x_i - \mu)/\sigma$ — the $z$-scored trace. §1–§3 operate
+  on $x$ as given; **every §4 (catch22) feature operates on $\tilde{x}$**,
+  internally and unconditionally.
 - `fs_hz` — sample rate in Hz. The features that touch the time axis
   (frequency-domain ones, activation-position-as-time variants) need it;
   the dimensionless complexity features don't.
@@ -887,64 +954,1098 @@ We delegate to `antropy.higuchi_fd(x, kmax=k_max)`.
 
 ---
 
-## 4. References
+## 4. catch22 features
+
+The 22 features of the **catch22** set (Lubba et al. 2019), plus the two
+`catch24` additions. These come from a different tradition than §1–§3:
+where our first eleven were chosen *because a cardiologist or a paper
+named them*, catch22 was chosen **statistically** — ~4800 candidate
+time-series features from the `hctsa` library filtered down to 22 that
+perform well across many classification tasks while being minimally
+redundant with each other. They are a general-purpose fingerprint of a
+time series' shape and dynamics, not an EGM-specific instrument.
+
+> **How to read this section.** Each entry gives the definition, what the
+> number means, a **worked anchor** computed on a signal where the answer
+> is checkable, and a short EGM read. Full derivations, the per-feature
+> literature, and the longer EGM-relevance discussion live in
+> `intracardiac-platform/project/investigations/catch22_techniques_explained.md`
+> — this section deliberately does not duplicate them. What it *does* own
+> is the part specific to this library: our naming, our parameter policy
+> (there isn't one — see §4.1), the anchors the tests assert, and the
+> reliability read at $T = 192$.
+
+### 4.1 About the catch22 set
+
+#### 4.1.1 What catch22 is, and how it differs from §1–§3
+
+Three differences matter for anyone reading a feature DataFrame.
+
+**1 · Everything is $z$-scored, so amplitude is gone.** Each feature is
+computed on $\tilde{x}_i = (x_i - \mu)/\sigma$. catch22 measures
+*time-ordering* properties and is deliberately insensitive to location and
+scale. For EGM work this is a real loss and a real gain: the single most
+established substrate marker — bipolar peak-to-peak voltage, the
+`< 0.5 mV` scar threshold — is **invisible** to every feature in this
+section, while morphology and rhythm are described far more richly than
+§1–§3 manage. The two sets are complementary, which is the entire reason
+we ship both. `peak_to_peak` (§1.1) remains the amplitude channel.
+
+**2 · There are no parameters to choose.** §1–§3 carry a deliberate
+math-constant-vs-project-policy split (`project/architecture.md`), because
+`sample_entropy`'s $m$ and $r$ are ours to pick. catch22's parameters are
+*part of the feature definition* — the "5" in `mode_5` is the bin count,
+the "40" in `ami_timescale` is the lag cap. Changing one would mean the
+feature is no longer the published statistic, so **none of the §4
+functions take parameters**, and none appear in the bundle's policy
+constants. The only choice we make is *which* features to compute, which
+is the feature-set registry, not a parameter.
+
+**3 · We delegate to the reference C implementation.** These are thin
+wrappers over `pycatch22`, the Fulcher-lab package, for the same reason
+§3 wraps `antropy`: it is the canonical implementation, and several of
+these features are fiddly enough (the two-regime crossover fit behind
+`rs_range` / `dfa`, the exponential fit in `embedding_dist`, Wang's peak
+conditions in `periodicity`) that a reimplementation would risk silently
+computing something else. `pycatch22` is an **optional extra** —
+`pip install "myocard-egm-features[catch22]"` — so the base library keeps
+its lean numpy/scipy/pandas/antropy footprint.
+
+#### 4.1.2 Naming — the hctsa code is the source of truth
+
+catch22 features have two names: the original `hctsa` code
+(`SP_Summaries_welch_rect_centroid`) and a short name (`centroid_freq`).
+We use short names as our column names, and we maintain **our own**
+mapping from hctsa code to short name.
+
+**That is not paranoia — the library's own short-name list is wrong for
+two features.** `pycatch22.catch22_all(..., short_names=True)` returns a
+list in which `centroid_freq` and `low_freq_power` are **crossed**
+relative to the hctsa codes they are paired with. Checked against signals
+where the answer is unarguable ($T = 192$, $f_s = 1000$ Hz):
+
+| signal | `..._welch_rect_area_5_1` | `..._welch_rect_centroid` |
+|---|---|---|
+| 3-cycle sine (very low frequency) | 0.998 | 0.037 |
+| 200-cycle sine (very high frequency) | 0.000 | 2.454 |
+| 50 Hz sine | 0.992 | **0.3191** |
+
+The 50 Hz row settles it: $2\pi \cdot 50 / 1000 = 0.3142$ rad/sample, so
+`..._centroid` is returning the **median frequency in rad/sample**, and
+`..._area_5_1` is the **fraction of power in the lowest 20% of
+frequencies** — the reverse of the labels the library hands back, and
+matching the Fulcher-lab documentation.
+
+Taking those labels at face value would have compared a median frequency
+on synthetic against a power fraction on IAFDB under one column name — a
+wrong answer with no error raised. So: **we key every lookup off the hctsa
+code**, never off `short_names`, and a test pins the mapping. Two further
+names we set ourselves rather than inherit: `transition_variance`
+(`pycatch22` says `transition_matrix`) and `std_dev` (it says `SD`).
+
+#### 4.1.3 Reliability at T = 192, and the usable-now set
+
+Several catch22 features need a long series to mean anything, and a
+192-sample window is short. Two groups are **not used** in the Phase-1.5
+comparison feature set, though all 22 are implemented and available —
+they are expected to earn their place once the project moves to longer,
+multi-beat windows:
+
+- **Self-affine scaling** ([§4.9](#49-self-affine-scaling)) — a
+  fluctuation curve needs a wide range of window sizes to fit two regimes
+  to; at $T = 192$ there isn't one.
+- **The linear-autocorrelation family**
+  ([§4.4](#44-linear-autocorrelation-structure)) — lag and period features
+  saturate once the timescale they measure approaches the window length. A
+  period longer than 192 samples simply cannot be seen.
+
+That leaves the **usable-now 14**: distribution shape (2), extreme-event
+timing (2), `trev`, `ami2`, `forecast_error`, `high_fluctuation`,
+`whiten_timescale`, the four symbolic features, and `embedding_dist`.
+
+**Two empirical caveats on that set**, measured over 400 traces per length
+drawn from one generative process (a biphasic deflection at a random
+position plus noise), comparing the across-trace spread at $T = 512$ vs
+$T = 192$:
+
+1. Six of the 14 widen by more than 1.5× at 192 — `entropy_pairs` 3.2×,
+   `transition_variance` 2.4×, `ami2` 2.1×, `high_fluctuation` 1.9×,
+   `embedding_dist` 1.6×. Wider spread is not disqualifying on its own,
+   but it costs separation.
+2. **`whiten_timescale` looks degenerate on single-activation traces** —
+   across 400 traces it returned *one* distinct value at $T = 512$ and
+   *four* at $T = 192$. A near-constant coordinate contributes nothing to
+   a distribution distance. Treat it as the first candidate to drop.
+
+Both are indicative, not decisive: the measurement used a crude surrogate,
+not real or simulated EGM. The feature-responsiveness screening on actual
+banks is what settles set membership.
+
+#### 4.1.4 Degenerate input — NaN, and why it must warn
+
+On a **constant** trace, 19 of the 22 features are mathematically
+undefined and `pycatch22` returns `NaN` (the three exceptions return 0).
+Near-degenerate traces — a flat-lined channel, a dropped electrode, an
+all-zero window from a failed export — produce the same thing.
+
+**We propagate the `NaN` rather than substituting a sentinel.** A silent
+`0.0` would enter a distribution distance as if it were a real coordinate
+and quietly bias the result, whereas a `NaN` column is visible and the
+consumer can drop it. Note this is a deliberate difference from §1–§3,
+where several features return a finite value in the same situation
+(`shannon_entropy` returns `0.0` on an empty signal).
+
+**But silence is its own failure mode.** Batch extraction over a large
+bank can run for minutes; discovering afterwards that a whole channel
+produced `NaN` wastes all of it, and a `NaN` that reaches a feature
+distribution unnoticed is worse than a crash. So the implementation
+**must warn when it produces `NaN`** — a single aggregated
+`RuntimeWarning` at the end of a batch naming how many traces and which
+features were affected, not one warning per trace (which would drown the
+output and slow the loop). The intent is that someone extracting a
+10,000-trace bank sees the problem early enough to cancel, fix the input,
+and not pay for the whole run twice.
+
+The `NaN` values themselves still flow through unchanged — the warning is
+diagnostic, never a behaviour change.
+
+#### 4.1.5 The anchor signals
+
+Every worked example below uses one of these six signals, all with
+$T = 192$ at $f_s = 1000$ Hz. They are defined here once so the numbers
+are reproducible and the tests can rebuild them exactly:
+
+| name | definition |
+|---|---|
+| `sine50` | $x_i = \sin(2\pi \cdot 50 \cdot i / 1000)$ — period exactly 20 samples |
+| `white` | `numpy.random.default_rng(0).standard_normal(192)` |
+| `ramp` | $x_i = i$ — a pure linear trend |
+| `constant` | $x_i = 1$ — the degenerate case |
+| `sawtooth` | $x_i = (i \bmod 64)/64$ — slow rise, sharp drop |
+| `biphasic` | $-\,\mathrm{d}/\mathrm{d}i$ of a Gaussian centred at $i = 96$ with $\sigma = 6$, scaled to unit peak — an idealised clean activation |
+
+All values quoted below are computed, not estimated; they are the values
+the test suite asserts.
+
+### 4.2 Distribution shape
+
+Both features histogram the $z$-scored trace into $B$ equal-width bins
+spanning $[\min \tilde{x}, \max \tilde{x}]$ and return the **centre of the
+most populated bin**:
+
+$$
+\text{mode}_B(x) = \operatorname{centre}\Big(\arg\max_b\, c_b\Big),
+\qquad c_b = \big|\{\, i : \tilde{x}_i \in \text{bin}_b \,\}\big| .
+$$
+
+The output is in standard deviations from the mean, because the input is
+$z$-scored. They differ only in $B$, and are blind to time ordering — two
+traces with the same amplitude histogram in any order score identically.
+
+#### 4.2.1 mode_5
+
+`DN_HistogramMode_5` — $B = 5$, a coarse read.
+
+**What it shows.** Where the *most probable* value sits relative to the
+mean, at low resolution. With only five bins spanning the full range, this
+is a robust, heavily-smoothed skew descriptor: it answers "which fifth of
+the amplitude range does this trace spend most of its time in."
+
+**Worked anchors.** `sine50` → $1.0905$: a sinusoid's density piles up at
+its turning points, not its centre, so the tallest bin sits well off zero.
+`white` → $-0.2179$, near zero, wandering with the finite realisation.
+`constant` → `NaN`.
+
+**EGM read.** On a $z$-scored EGM window the histogram is dominated by
+**baseline** — the trace sits near zero between activations — with a thin
+tail during the deflection. So `mode_5` mostly reports the
+baseline-versus-deflection **duty cycle**, and its sign reports the
+deflection's **polarity**: a predominantly negative bipolar deflection
+drags the mean down, pushing the baseline mode positive. Coarse enough to
+be stable on noisy IAFDB windows.
+
+#### 4.2.2 mode_10
+
+`DN_HistogramMode_10` — $B = 10$, a finer read of the same histogram.
+
+**What it shows.** The same quantity at twice the resolution, so it can
+resolve structure `mode_5` smooths over — a secondary density peak, or a
+baseline that is itself split.
+
+**Worked anchors.** `sine50` → $1.2324$ (vs $1.0905$ at $B=5$ — the finer
+grid localises the turning-point pile-up better). `white` → $0.4654$,
+where `mode_5` gave $-0.2179$: on unstructured data the mode is unstable
+and the two bin counts need not agree.
+
+**EGM read.** Same interpretation as `mode_5`, with more sensitivity to
+fine amplitude structure and correspondingly more noise. Its real value is
+**relative to `mode_5`**, below.
+
+**Reading the family together.** The pair is more informative than either
+alone. When `mode_5` and `mode_10` **agree**, the amplitude histogram has
+one clear, broad peak — a clean baseline-plus-deflection trace. When they
+**disagree** (as on `white`), the density has no stable mode: either
+genuinely multimodal, or noise-dominated with no structure to find. That
+disagreement is a cheap unimodality probe no single feature gives you. Both
+pair naturally with `shannon_entropy` (§3.2), which bins the *same*
+histogram but returns its **spread** rather than its **location** — mode
+says where the mass is, entropy says how concentrated.
+
+### 4.3 Extreme-event timing
+
+Both sweep a threshold $\theta$ (upward from 0 for the positive version,
+downward for the negative), and at each $\theta$ take the **median index**
+of the samples beyond it, rescaled so the window's middle maps to 0, its
+end to $+1$, and its start to $-1$:
+
+$$
+r(\theta) = \frac{\operatorname{med}\{\, i : \tilde{x}_i \ge \theta \,\}}{T/2} - 1,
+\qquad
+\text{outlier\_timing} = \operatorname*{med}_{\theta} r(\theta) \in [-1, 1].
+$$
+
+Unlike everything in §4.2, these are explicitly **positional** — they ask
+*when*, not *what*.
+
+#### 4.3.1 outlier_timing_pos
+
+`DN_OutlierInclude_p_001_mdrmd` — thresholds swept upward, so it tracks
+the **positive** excursions.
+
+**What it shows.** Where in time the large *upward* deviations live.
+$\approx 0$: spread evenly through the window. Negative: clustered early.
+Positive: clustered late.
+
+**Worked anchors.** `sine50` → exactly $0.0$ — extremes recur throughout,
+so the median index is dead centre. `ramp` → $+0.7500$: the largest values
+are all at the end, which is the sign convention made concrete. `white` →
+$-0.0833$.
+
+**EGM read.** For a single-activation window this is essentially **where
+the positive limb of the deflection sits** — closely related to
+`activation_position` (§1.3), but derived from the amplitude distribution
+rather than from $\mathrm{d}V/\mathrm{d}t$, so it degrades differently on
+fractionated signal. On a continuous IAFDB window a non-zero value flags
+positive-going activity **drifting** through the window.
+
+#### 4.3.2 outlier_timing_neg
+
+`DN_OutlierInclude_n_001_mdrmd` — thresholds swept downward, tracking the
+**negative** excursions.
+
+**What it shows.** The mirror statistic: where the large *downward*
+deviations live, on the same $[-1, 1]$ scale.
+
+**Worked anchors.** `sine50` → exactly $0.0$. `ramp` → $-0.7396$: the
+smallest values are all at the start. `white` → $+0.1198$.
+
+**EGM read.** Where the negative limb sits. On a bipolar activation the
+negative limb is usually the sharp one, so this is often the better
+positional marker of the two.
+
+**Reading the family together.** The pair is a **stationarity and
+asymmetry probe**, and the interesting information is in how the two
+compare:
+
+- **Both $\approx 0$** — activity is stationary and centred. This is what
+  an activation-centred synthetic trace should look like, and a useful
+  sanity check that the splitter did its job.
+- **Both the same sign** — the whole window's activity is drifting toward
+  one end. On real IAFDB this is the signature of a fibrillatory burst
+  starting or stopping mid-window, or a catheter making or losing contact.
+  A segmentation-quality flag more than a substrate marker.
+- **Opposite signs** (as on `ramp`, $+0.75$ / $-0.74$) — the positive and
+  negative excursions sit at *different* times, which is what a monotone
+  trend or a single asymmetric deflection produces. The **gap** between
+  them is a crude read of the deflection's internal timing.
+
+Together they cover what a single centre-of-mass measure cannot: `sine50`
+and a trace with one early positive and one late negative spike both have
+their overall energy centred, but only the latter separates the pair.
+
+### 4.4 Linear autocorrelation structure
+
+> **Deferred family** — implemented and available, but **not** in the
+> Phase-1.5 comparison set. Every one of these measures a lag, a period,
+> or a spectral summary that saturates when the timescale approaches the
+> window length, and $T = 192$ is short. They are expected to become the
+> most valuable family once the project moves to multi-beat windows. See
+> [§4.1.3](#413-reliability-at-t--192-and-the-usable-now-set).
+
+Five read the autocorrelation function of the $z$-scored trace,
+
+$$
+\rho(\tau) = \frac{\sum_{i=1}^{T-\tau}(x_i - \mu)(x_{i+\tau} - \mu)}{\sum_{i=1}^{T}(x_i - \mu)^2},
+\qquad \rho(0) = 1,
+$$
+
+and two read its Fourier partner, the Welch power spectrum $\hat{S}(f)$ —
+the same information in two coordinate systems, which is why they share a
+family.
+
+#### 4.4.1 acf_timescale
+
+`CO_f1ecac` — the smallest $\tau$ at which $\rho(\tau) \le 1/e \approx
+0.3679$, linearly interpolated to a real-valued lag.
+
+**What it shows.** The **memory length** in samples: how far ahead the
+signal stays substantially correlated with itself. An AR(1) process with
+coefficient $\phi$ has $\rho(\tau) = \phi^\tau$ and so crosses at
+$-1/\ln\phi$.
+
+**Worked anchors.** `white` → $0.6717$ (no memory, as it should be);
+`sine50` → $3.8047$; `ramp` → $41.7737$, since a trend stays correlated
+for a long time.
+
+**EGM read.** How **oscillatory versus noise-like** the local signal is.
+Organised, rhythmic activity holds correlation; fractionated or
+noise-dominated signal loses it within a few samples. At $T = 192$ the
+measurable range is capped well below an atrial cycle length, which is
+exactly why the family is deferred.
+
+#### 4.4.2 acf_first_min
+
+`CO_FirstMin_ac` — the smallest $\tau$ with
+$\rho(\tau-1) > \rho(\tau) < \rho(\tau+1)$.
+
+**What it shows.** For an oscillation, the first ACF trough sits at
+**half the dominant period**, so this is a direct period estimate. Where
+`acf_timescale` reads the decay rate, this reads the first
+anti-correlation.
+
+**Worked anchors.** `sine50` → exactly $10.0$, against a period of 20
+samples — $P/2$, precisely as the theory predicts, and the cleanest
+verification anchor in this family. `white` → $1.0$.
+
+**EGM read.** The most direct route to **atrial cycle length** in the
+catch22 set — on a multi-beat window it would report half the
+activation-to-activation interval. On a 192-sample single-activation
+window there is no second beat to correlate against, so the value is
+structurally uninformative here.
+
+#### 4.4.3 periodicity
+
+`PD_PeriodicityWang_th0_01` — detrend with a three-knot cubic-regression
+spline, then return the lag of the **first ACF peak** meeting Wang's
+amplitude and shape conditions; 0 if none qualifies.
+
+**What it shows.** The **dominant repeating period** in samples, made
+robust by the detrending and the peak conditions. High for slow, clearly
+periodic signals; 0 when nothing qualifies as periodic.
+
+**Worked anchors.** `sine50` → $19.0$, recovering the 20-sample period to
+within the peak-condition tolerance. `ramp`, `sawtooth`, and `constant`
+all → $0.0$ — nothing passes the conditions.
+
+**EGM read.** A stricter, better-defended rhythm estimate than
+`acf_first_min`, because a trace has to *earn* a non-zero value. The 0
+return is informative in itself: a hard "no periodicity found here," which
+is the expected answer for a single activation and a meaningful one for
+disorganised AF.
+
+#### 4.4.4 low_freq_power
+
+`SP_Summaries_welch_rect_area_5_1` — the fraction of Welch spectral power
+below $0.2 f_{Ny}$:
+
+$$
+\text{low\_freq\_power} = \frac{\sum_{f \le 0.2 f_{Ny}} \hat{S}(f)}{\sum_f \hat{S}(f)} \in [0,1].
+$$
+
+**What it shows.** $\to 1$: energy concentrated at low frequencies (a slow
+signal); $\to 0$: energy at high frequencies.
+
+**Worked anchors.** `white` → $0.2584$ — a flat spectrum puts ~20% of its
+power in the lowest 20% of the band, which is the sanity check on the
+definition itself. `sine50` → $0.9920$, since 50 Hz is well below
+$0.2 \times 500 = 100$ Hz.
+
+**EGM read.** A coarse **fractionation** proxy from the frequency side: a
+smooth activation concentrates power low, while sharp secondary
+deflections and fragmentation push energy up. Blunt compared with
+`sec_peak_count` (§1.4), but it needs no peak-detection policy to compute.
+
+#### 4.4.5 centroid_freq
+
+`SP_Summaries_welch_rect_centroid` — the Welch spectrum's **median**
+frequency, in **radians per sample**: the $f_{\text{med}}$ splitting total
+power in half.
+
+**What it shows.** Where the spectral mass sits. High → fast morphology.
+
+**Worked anchors.** `sine50` → $0.3191$ against the exact
+$2\pi \cdot 50/1000 = 0.3142$ — this is the anchor that proves the naming
+correction in [§4.1.2](#412-naming--the-hctsa-code-is-the-source-of-truth).
+`white` → $1.3990$, near the $\pi/2 \approx 1.571$ a flat spectrum implies.
+
+> **Not interchangeable with our `spectral_centroid` (§2.2).** Ours is the
+> power-weighted **mean** in Hz; this is the **median** in rad/sample. On a
+> skewed EGM spectrum they differ substantially. Two different statistics
+> that happen to share a word.
+
+**EGM read.** The catch22 analogue of dominant-frequency mapping's rate
+axis. Because it is a *median*, it is markedly more robust than our mean
+`spectral_centroid` to a single high-frequency artefact — which on noisy
+real recordings is a meaningful advantage.
+
+#### 4.4.6 ami_timescale
+
+`IN_AutoMutualInfoStats_40_gaussian_fmmi` — the first minimum of the
+automutual-information function under a Gaussian estimator, capped at lag
+40. Under that assumption $I(\tau) = -\tfrac{1}{2}\ln(1-\rho(\tau)^2)$, a
+nonlinear transform of the ACF; the first minimum is the classic
+Fraser–Swinney choice of **time-delay for phase-space embedding**.
+
+**What it shows.** A mildly nonlinear autocorrelation timescale. High =
+long memory; low = noise-like.
+
+**Worked anchors.** `white` → $2.0$; `sine50` → $4.0$; `sawtooth` →
+$16.0$.
+
+**EGM read.** Same rate-and-organisation axis as `acf_timescale`, but via
+an information-theoretic route that survives monotone nonlinearities in
+the recording chain. The lag-40 cap is $40$ ms at 1 kHz — comfortably
+shorter than an atrial cycle, another reason this family wants longer
+windows.
+
+**Reading the family together.** These six trilaterate **rate and
+organisation**, the axis clinical AF analysis cares most about, from three
+independent directions — ACF decay (`acf_timescale`, `ami_timescale`), ACF
+structure (`acf_first_min`, `periodicity`), and the spectrum
+(`low_freq_power`, `centroid_freq`). The combinations carry the signal:
+
+- **All three routes agree** on a timescale → a genuinely organised,
+  rhythmic segment. `acf_first_min` $\approx$ half of `periodicity`, and
+  `centroid_freq` consistent with both, is the signature.
+- **ACF says periodic, spectrum says broadband** → the rhythm is present
+  but buried in fractionated high-frequency content — plausibly the most
+  substrate-relevant combination in the family.
+- **`periodicity` returns 0 while `acf_timescale` stays high** → the signal
+  has memory but no repeating period: drift or a single slow event, not a
+  rhythm.
+
+The linear/nonlinear pair (`acf_timescale` vs `ami_timescale`) adds a
+fourth read: a large gap between them implies dependence a linear ACF
+cannot see, which is where §4.5 picks up.
+
+### 4.5 Nonlinear autocorrelation
+
+Two features capturing dependence structure a *linear* ACF misses. Both
+are cheap, both are in the usable-now set, and both survive short windows
+well — they aggregate over every sample pair rather than estimating a
+timescale.
+
+#### 4.5.1 trev
+
+`CO_trev_1_num` — the mean cube of successive differences:
+
+$$
+\text{trev} = \frac{1}{T-1}\sum_{i=1}^{T-1}\big(\tilde{x}_{i+1} - \tilde{x}_i\big)^3 .
+$$
+
+**What it shows.** A **time-irreversibility** probe. Cubing preserves sign
+and amplifies large steps, so the statistic is $\approx 0$ when up-steps
+and down-steps have mirror-image distributions, **positive** when the
+sharp moves are rises, and **negative** when they are drops. Linear
+Gaussian processes are time-reversible, so a non-zero value signals
+nonlinearity.
+
+**Worked anchors.** `sawtooth` → $-0.4119$: it ramps up gently over 64
+samples and drops in one, so the rare huge negative step dominates the
+cube — the sign convention demonstrated on a signal built for it.
+`sine50` → $-0.0004$ (symmetric, so $\approx 0$). `biphasic` → $+0.0196$.
+
+**EGM read.** One of the most EGM-appropriate features in catch22. A
+bipolar activation is **morphologically asymmetric** — a fast steep limb
+and a slower recovery — and `trev` reads exactly that upstroke/downstroke
+asymmetry, with the sign naming which limb is sharper. Fractionated
+activations distort the asymmetry differently from clean biphasic ones,
+and unlike `sec_peak_count` (§1.4) it needs no threshold policy to say so.
+
+#### 4.5.2 ami2
+
+`CO_HistogramAMI_even_2_5` — mutual information between the trace and
+itself at lag 2, from a 2-D histogram with 5 equal-width bins per axis:
+
+$$
+\text{ami2} = \sum_a \sum_b p(a,b)\,\log \frac{p(a,b)}{p(a)\,p(b)} .
+$$
+
+**What it shows.** How much the value now tells you about the value two
+samples later, **including nonlinear** structure that $\rho(2)$ would
+miss. $\approx 0$ means independence.
+
+**Worked anchors.** `white` → $0.0675$ (independent, as it should be);
+`sine50` → $0.7448$ (deterministic short-lag structure); `ramp` →
+$1.4392$.
+
+**EGM read.** Short-range **nonlinear predictability**. Organised
+activation carries structured short-lag dependence; disorganised
+fibrotic signal tends lower. Conceptually adjacent to `sample_entropy`
+(§3.1) — both probe predictability — but by an information-theoretic,
+fixed-lag route, and at $O(T)$ rather than `sample_entropy`'s $O(T^2)$.
+
+**Reading the family together.** The two are near-orthogonal and most
+useful read as a pair, because they answer different questions about the
+same 2-sample neighbourhood: `ami2` asks **how much** structure is there,
+`trev` asks **what shape** it has.
+
+- **High `ami2`, `trev` $\approx 0$** — strongly predictable and
+  symmetric: a smooth, clean, organised waveform.
+- **High `ami2`, `trev` far from 0** — predictable but asymmetric: a
+  structured activation with a distinct sharp limb, which is what a
+  healthy bipolar deflection should look like.
+- **Low `ami2`, `trev` $\approx 0$** — noise.
+
+That last case matters practically: it is the combination that says a
+window carries no usable morphology at all, and neither feature says it
+alone.
+
+### 4.6 Simple forecasting
+
+One feature, and the only one in catch22 that frames the trace as a
+**prediction** problem.
+
+#### 4.6.1 forecast_error
+
+`FC_LocalSimple_mean3_stderr` — predict each sample from the mean of the
+previous three and return the standard deviation of the residuals:
+
+$$
+\hat{x}_t = \tfrac{1}{3}\big(\tilde{x}_{t-1} + \tilde{x}_{t-2} + \tilde{x}_{t-3}\big),
+\qquad
+\text{forecast\_error} = \operatorname{std}\big(\tilde{x}_t - \hat{x}_t\big).
+$$
+
+**What it shows.** Predictability at a 3-sample horizon by a trivial
+local-mean model. Because the input is $z$-scored ($\sigma = 1$), a
+forecaster doing anything useful yields residual std $< 1$; $\ge 1$ means
+the 3-point mean is worse than useless.
+
+**Worked anchors.** `white` → $1.1331$ — above 1, and correctly so: on
+unpredictable data the local mean actively hurts. `biphasic` → $0.4007$
+and `sine50` → $0.6108$, both smooth enough to be locally predictable.
+`ramp` → $0.0000$: a straight line is *exactly* forecast by a local mean.
+
+**EGM read.** A **smoothness** proxy at the sampling scale. A clean
+activation is well predicted by a local mean; a fragmented or noisy one is
+not. Note it is **sample-rate dependent** — "3 samples" is 3 ms at 1 kHz —
+so values are only comparable at fixed $f_s$, the constraint
+[Preprocessing assumptions](#preprocessing-assumptions) already imposes.
+
+**Reading it alongside the others.** `forecast_error` is a scalar summary
+of the same predictability `ami2` (§4.5.2) and `sample_entropy` (§3.1)
+probe, and the three disagree informatively. `forecast_error` is
+**linear and local** (three neighbouring samples); `ami2` is **nonlinear
+and fixed-lag**; `sample_entropy` is **nonlinear and pattern-matching
+across the whole trace**. A trace that is hard to forecast but has high
+`ami2` carries nonlinear structure a local mean cannot exploit — which is
+precisely the profile of a sharp, well-formed deflection, and distinguishes
+it from noise, which scores poorly on both.
+
+### 4.7 Incremental differences
+
+Both read the one-step differences
+$\Delta \tilde{x}_i = \tilde{x}_i - \tilde{x}_{i-1}$, and between them they
+separate two things that are easy to conflate: **how much** the trace
+moves, and **how much of its correlation is slow drift**.
+
+#### 4.7.1 high_fluctuation
+
+`MD_hrv_classic_pnn40` — the proportion of successive differences
+exceeding $0.04\sigma$; on a $z$-scored series, simply $0.04$:
+
+$$
+\text{high\_fluctuation} = \frac{1}{T-1}\big|\{\, i : |\tilde{x}_{i+1} - \tilde{x}_i| > 0.04 \,\}\big| .
+$$
+
+This is **pNN40**, borrowed from heart-rate-variability analysis.
+
+**What it shows.** $\to 0$: the series has long near-flat stretches.
+$\to 1$: it moves at nearly every step.
+
+**Worked anchors.** `biphasic` → $0.2094$ — one sharp deflection on a flat
+baseline, so ~79% of steps are essentially still. `white` → $0.9791$ and
+`sine50` → $1.0000$ (every step moves).
+
+**EGM read.** A **duty-cycle** measure: how much of the window is actively
+deflecting versus quiet baseline. A single activation on a clean baseline
+reads low; sustained fragmented activity, or continuous AF, reads high.
+Complements `sec_peak_count` (§1.4), which counts *deflections* where this
+measures *occupancy* — a trace with one long messy activation and a trace
+with three crisp ones can share a peak count but not a duty cycle.
+
+#### 4.7.2 whiten_timescale
+
+`FC_LocalSimple_mean1_tauresrat` — the ratio of the first ACF
+zero-crossing of the *differenced* series to that of the original:
+
+$$
+\text{whiten\_timescale} = \frac{\tau_0(\Delta \tilde{x})}{\tau_0(\tilde{x})},
+\qquad \tau_0(\cdot) = \min\{\tau : \rho(\tau) \le 0\}.
+$$
+
+**What it shows.** How much a single differencing step **whitens** the
+signal. Small → differencing destroyed a strong slow correlation, so the
+trace was trend-dominated. Near 1 → it was already white-ish.
+
+**Worked anchors.** `sawtooth` → $0.0588$: mostly slow ramp, and
+differencing annihilates it. `sine50` → $0.8333$; `biphasic` → $0.7778$.
+
+**EGM read.** How much of the window's autocorrelation is slow **baseline
+wander** rather than morphology — a signal-quality axis rather than a
+clinical one, and a candidate flag for windows whose apparent structure is
+really drift.
+
+> ⚠️ See [§4.1.3](#413-reliability-at-t--192-and-the-usable-now-set): on
+> repeated single-activation traces this feature was **near-constant**, so
+> it may carry no usable information at this window length despite being
+> in the usable-now 14.
+
+**Reading the family together.** The pair separates activity from drift,
+which neither does alone:
+
+- **High `high_fluctuation`, `whiten_timescale` near 1** — genuinely
+  active, broadband morphology on a stable baseline. The fragmented-EGM
+  profile.
+- **High `high_fluctuation`, low `whiten_timescale`** — the trace moves a
+  lot, but its correlation is dominated by slow wander. Suspect baseline
+  drift or a contact problem rather than substrate.
+- **Low `high_fluctuation`, low `whiten_timescale`** — quiet and
+  drifting: a near-flat channel that is not actually recording much.
+
+The middle case is the one worth having: `high_fluctuation` alone would
+call it interesting, and it usually isn't.
+
+### 4.8 Symbolic
+
+These discretise the trace first, then compute statistics on the symbol
+sequence. Quantisation discards fine amplitude detail but is **robust to
+noise**, which makes this family unusually well suited to the low-SNR real
+side of a synthetic-versus-real comparison.
+
+#### 4.8.1 stretch_high
+
+`SB_BinaryStats_mean_longstretch1` — binarise $b_i = 1$ if
+$\tilde{x}_i > \mu$, and return the length of the longest run of 1s:
+
+$$
+\text{stretch\_high} = \max\{\, \ell : b_j = \dots = b_{j+\ell-1} = 1 \,\}.
+$$
+
+**What it shows.** The longest uninterrupted excursion above the mean, in
+samples. For a sinusoid of period $P$ this is $\approx P/2$.
+
+**Worked anchors.** `sine50` → exactly $10.0$ against a 20-sample period.
+`white` → $8.0$. `biphasic` → $95.0$ — worth pausing on: the long quiet
+baseline sits *above* the mean, because the single large downward
+deflection drags the mean below the baseline. "Above the mean" is not
+"active."
+
+**EGM read.** Dwell time on one side of the mean. On a trace with one
+dominant deflection it inverts into a **baseline-length** measure (as the
+`biphasic` anchor shows), which is genuinely useful — it is close to a
+measure of how much of the window is *not* activation.
+
+#### 4.8.2 stretch_decreasing
+
+`SB_BinaryStats_diff_longstretch0` — binarise the *differences*
+($b_i = 1$ if $\tilde{x}_i > \tilde{x}_{i-1}$) and return the longest run
+of 0s: the longest monotone decrease.
+
+**What it shows.** The longest uninterrupted downward run, in samples — a
+coarse read of the slowest downstroke in the trace.
+
+**Worked anchors.** `biphasic` → $72.0$, the long smooth decay of the
+Gaussian tail. `white` → $5.0$; `sine50` → $11.0$.
+
+**EGM read.** A **slope-duration** proxy, and the closest catch22 comes to
+the clinical notion of activation *width*. A fragmented activation is
+interrupted by secondary deflections, breaking long monotone runs, so this
+shortens as fractionation increases — the same phenomenon
+`sec_peak_count` counts, measured as a duration instead.
+
+#### 4.8.3 entropy_pairs
+
+`SB_MotifThree_quantile_hh` — map each sample to one of three symbols by
+**equiprobable tertiles**, form all consecutive two-letter words, and
+return the Shannon entropy of their distribution:
+
+$$
+\text{entropy\_pairs} = -\sum_{s \in \{A,B,C\}^2} p(s) \log p(s)
+\;\in\; [0,\ \ln 9 \approx 2.197].
+$$
+
+**What it shows.** Predictability of two-step symbolic transitions. Low →
+a few pairs dominate (structured); high → all nine near-equiprobable
+(unpredictable at the pair scale).
+
+**Worked anchors.** `white` → $2.1803$, close to the $\ln 9$ ceiling —
+exactly right for an unpredictable series, and a good verification that
+the tertile mapping is equiprobable as specified. `sine50` → $1.6506$;
+`biphasic` → $1.2062$ (structured, well below the ceiling).
+
+**EGM read.** A noise-robust **disorder** measure. Because tertiles are
+equiprobable by construction, it is invariant to the amplitude
+distribution and reads pure sequencing — a fragmented fibrotic EGM should
+score higher than an organised activation. The nearest §3 cousin is
+`shannon_entropy` (§3.2), but that bins amplitudes and ignores order,
+where this ignores amplitude and reads order.
+
+#### 4.8.4 transition_variance
+
+`SB_TransitionMatrix_3ac_sumdiagcov` — tertile-symbolise into 3 states,
+set $\tau$ to the first ACF zero-crossing, build the $3\times3$ $\tau$-step
+transition-probability matrix $P$, and return the sum of its column
+variances:
+
+$$
+\text{transition\_variance} = \sum_{k=1}^{3} \operatorname{Var}_j\big(P_{jk}\big).
+$$
+
+**What it shows.** How **specific** the state transitions are, evaluated at
+the timescale where linear autocorrelation has faded. Near-uniform
+transitions (noise) → low; sharply determined transition rules → high.
+
+**Worked anchors.** `white` → $0.0028$ — near-uniform, no rule. `ramp` →
+$0.1667$ $(= 1/6)$, the maximally deterministic case. `biphasic` →
+$0.0703$.
+
+**EGM read.** Whether the coarse dynamics follow a **rule**. Organised
+activation moves through baseline → upstroke → recovery in a determined
+order; disorganised signal does not. Because $\tau$ is chosen adaptively
+from the ACF, it asks the question at whatever timescale the trace itself
+makes relevant.
+
+**Reading the family together.** The four split cleanly into two **shape**
+features and two **disorder** features, and the cross-comparisons are
+where the family earns its place:
+
+- **`entropy_pairs` high *and* `transition_variance` low** — disordered at
+  both the pair scale and the rule scale. The clearest symbolic signature
+  of a fragmented, disorganised window, and the pair the fibrosis
+  hypothesis predicts.
+- **`entropy_pairs` high but `transition_variance` high too** — locally
+  varied yet rule-governed. Structured complexity rather than noise; a
+  fast but organised rhythm can look like this.
+- **`stretch_high` long *and* `stretch_decreasing` short** — a long quiet
+  baseline broken by a sharp, interrupted deflection: the fractionation
+  profile in shape terms.
+- **Both stretches long** — a slow, smooth, single-event trace.
+
+Because all four survive heavy quantisation, they travel onto noisy real
+recordings better than the amplitude-sensitive features in §1, which is
+the practical argument for keeping the whole family in the comparison set.
+
+### 4.9 Self-affine scaling
+
+> **Deferred pair** — implemented but **not** in the Phase-1.5 comparison
+> set; a fluctuation curve needs a wider range of window sizes than 192
+> samples affords. Expected to become usable on multi-beat windows. See
+> [§4.1.3](#413-reliability-at-t--192-and-the-usable-now-set).
+
+Both ask whether the signal has self-affine (fractal, long-range
+correlated) scaling. Form the cumulative profile
+$Y_j = \sum_{i \le j} \tilde{x}_i$, split it into windows of size $s$,
+remove a local trend in each, measure the residual fluctuation $F(s)$, and
+look for a power law $F(s) \propto s^{H}$ — a straight line in
+$\log F$ versus $\log s$. They differ only in the detrending step.
+
+> **⚠️ The output is not the Hurst exponent.** catch22 fits **two**
+> scaling regimes and returns a value in $[0,1]$ encoding **where the
+> crossover between them sits** (`prop_r1` = the proportion of the
+> timescale range in the low-scale regime). Low → the scaling law changes
+> at short timescales; high → one law persists to long ones.
+
+#### 4.9.1 rs_range
+
+`SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1` — **rescaled-range**
+detrending: remove the line joining each window's endpoints and take the
+**range** (max − min) of the residuals.
+
+**What it shows.** The crossover position of the rescaled-range
+fluctuation curve. Because it uses a range, it is driven by the extremes
+within each window.
+
+**Worked anchors.** `white` → $0.4762$; `sine50` → $0.3810$; `sawtooth` →
+$0.8333$.
+
+**EGM read.** Roughness reached through extremes, so it is comparatively
+sensitive to isolated sharp deflections — the events fibrosis work cares
+about, but also the events an artefact produces.
+
+#### 4.9.2 dfa
+
+`SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1` — **detrended fluctuation
+analysis**: fit a linear polynomial per window and take the **RMS** of the
+residuals, after downsampling the series by 2.
+
+**What it shows.** The same crossover position via an RMS rather than a
+range, making it the more stable of the two. DFA is a workhorse in HRV
+analysis and has established AF applications.
+
+**Worked anchors.** `white` → $0.8333$; `sine50` → $0.1429$.
+
+**EGM read.** Roughness reached through typical deviations rather than
+extremes, so it is the better-behaved substrate descriptor of the pair and
+the one to reach for first if only one is affordable.
+
+**Reading the family together.** The two share a method and differ only in
+detrending, which makes their **agreement a built-in reliability check** —
+unusual, and useful given the family's known instability:
+
+- **`rs_range` and `dfa` agree** — there is genuine scaling structure, and
+  the crossover estimate can be trusted.
+- **They disagree sharply** (as on `white`: $0.4762$ vs $0.8333$) — the
+  fluctuation curve has no clean two-regime fit, and neither value should
+  be read as a substrate property. On our 192-sample windows this is the
+  expected outcome, which is the concrete reason the pair is deferred.
+
+Both are conceptual cousins of `higuchi_fractal_dimension` (§3.4) — the
+same roughness intuition — but reached by fluctuation scaling rather than
+curve-length scaling, and reported as a crossover position rather than a
+dimension. They are **not** a drop-in substitute for it, and the fact that
+§3.4 remains stable at $T = 192$ while these two do not is the reason we
+still ship it.
+
+### 4.10 Other
+
+One feature that fits none of the other families — a phase-space
+descriptor.
+
+#### 4.10.1 embedding_dist
+
+`CO_Embed2_Dist_tau_d_expfit_meandiff` — build a 2-D time-delay embedding
+with $\tau$ = the first ACF zero-crossing, take successive Euclidean step
+distances, fit an exponential to their distribution, and return the mean
+absolute error of that fit:
+
+$$
+\mathbf{v}_t = (\tilde{x}_t,\ \tilde{x}_{t+\tau}), \qquad
+d_t = \lVert \mathbf{v}_{t+1} - \mathbf{v}_t \rVert, \qquad
+\text{embedding\_dist} = \operatorname{MAE}\big(\mathrm{expfit}(P(d))\big).
+$$
+
+Time-delay embedding is the standard Takens attractor reconstruction.
+
+**What it shows.** How closely the reconstructed trajectory's step
+distances follow an **exponential** law. Low → near-exponential, so
+stochastic-looking. Higher → structured, deterministic geometry.
+
+**Worked anchors.** `white` → $0.0821$ (stochastic, near-exponential);
+`biphasic` → $0.7540$ and `sine50` → $0.6411$ (both strongly structured).
+
+**EGM read.** A nonlinear-dynamics descriptor separating stochastic-looking
+from structured morphology. More exploratory for EGM than the amplitude
+and fractionation features, but cheap once $\tau$ is known, and it is the
+only feature here that reads trajectory *geometry* rather than a time or
+amplitude statistic. `sample_entropy` (§3.1) shares the delay-embedding
+idea but returns a regularity measure rather than an embedding-geometry
+fit, so the two are complementary: `sample_entropy` asks whether patterns
+repeat, `embedding_dist` asks what shape the trajectory traces.
+
+### 4.11 The catch24 additions
+
+"catch24" is catch22 plus the two statistics $z$-scoring removes. They are
+computed on the **raw** trace $x$, not $\tilde{x}$ — the only features in
+§4 that see amplitude at all.
+
+#### 4.11.1 mean
+
+`DN_Mean` — the arithmetic mean of the raw trace:
+
+$$
+\text{mean} = \frac{1}{T}\sum_i x_i .
+$$
+
+**What it shows.** The DC level catch22 discards.
+
+**Worked anchors.** `ramp` → $95.5$, exactly $(0 + 191)/2$. `constant` →
+$1.0$ — defined where 19 of the other 22 return `NaN`.
+
+**EGM read.** Near-zero by construction on a bandpassed EGM, so on our
+data it is mostly a **check that the bandpass did its job**: a materially
+non-zero mean indicates DC offset or baseline wander that should have been
+filtered out.
+
+#### 4.11.2 std_dev
+
+`DN_Spread_Std` — the population standard deviation of the raw trace:
+
+$$
+\text{std\_dev} = \sqrt{\frac{1}{T}\sum_i (x_i - \mu)^2} .
+$$
+
+**What it shows.** The amplitude scale catch22 discards.
+
+**Worked anchors.** `ramp` → $55.5698$. `constant` → $0.0$ — the
+degenerate case, and the reason 19 other features return `NaN` on it:
+division by this zero.
+
+**EGM read.** An amplitude measure, and therefore the one catch24 feature
+that touches the voltage axis fibrosis mapping is built on. But it is
+**RMS-like, not peak-to-peak**: it is driven by the whole window,
+including the long quiet baseline, so a short sharp activation on a quiet
+baseline has a small `std_dev` despite a large deflection.
+`peak_to_peak` (§1.1) is the clinically-calibrated statistic and the one
+whose thresholds the literature defines.
+
+**Reading the pair together, and why they are not in our default sets.**
+Together they restore exactly what $z$-scoring removed, so a caller who
+wants canonical catch24 can reconstruct it. But `egm-features` already
+carries the amplitude channel in a better form: `peak_to_peak` (§1.1) is
+the statistic the voltage-mapping literature actually thresholds, and
+`mean` is near-zero by construction post-bandpass. The informative
+comparison is **`std_dev` against `peak_to_peak`**: their *ratio* is a
+crude duty-cycle read — a trace whose peak-to-peak is large while its
+`std_dev` stays small is one brief deflection on a quiet baseline, whereas
+a ratio near 1 means the window is deflecting throughout. That ratio is
+worth more than either catch24 feature alone, which is why both are
+registered but neither is in a default set.
+
+## 5. References
+
+> Links are given as resolvable DOIs where one could be confirmed, and as a
+> publisher or PubMed URL otherwise. Three older references
+> (Inouye 1991, Esteller 2001, Aboy 2006) are listed without a link because
+> their DOIs could not be verified at the time of writing — better no link
+> than a wrong one.
 
 ### Core feature papers
 
 - **Marchlinski FE, Callans DJ, Gottlieb CD, Zado E.** *Linear ablation
   lesions for control of unmappable ventricular tachycardia in patients
-  with ischemic and nonischemic cardiomyopathy.* Circulation 2000.
-  [Bipolar voltage threshold convention, used for `peak_to_peak`.]
+  with ischemic and nonischemic cardiomyopathy.* Circulation 2000;101:1288.
+  [doi:10.1161/01.CIR.101.11.1288](https://doi.org/10.1161/01.CIR.101.11.1288)
+  — bipolar voltage threshold convention, used for `peak_to_peak` (§1.1).
 - **Sanders P et al.** *Spectral analysis identifies sites of
   high-frequency activity maintaining atrial fibrillation in humans.*
-  Circulation 2005. [Atrial dominant-frequency analysis.]
-- **Kosiuk J et al.** *Validation of voltage mapping during AF: 0.2 mV
-  threshold.* (PMID 30873619). [AF-adjusted voltage thresholds.]
+  Circulation 2005;112:789.
+  [doi:10.1161/CIRCULATIONAHA.104.517011](https://doi.org/10.1161/CIRCULATIONAHA.104.517011)
+  — atrial dominant-frequency analysis (§2.4).
+- **Kosiuk J et al.** *Validation of voltage mapping during atrial
+  fibrillation: the 0.2 mV threshold.*
+  [PMID 30873619](https://pubmed.ncbi.nlm.nih.gov/30873619/)
+  — AF-adjusted voltage thresholds.
 - **Nademanee K et al.** *A new approach for catheter ablation of atrial
-  fibrillation: mapping of the electrophysiologic substrate (CFAE).*
-  J Am Coll Cardiol 2004. [Complex-fractionated EGM definition,
-  background for `sec_peak_count`.]
+  fibrillation: mapping of the electrophysiologic substrate.* J Am Coll
+  Cardiol 2004;43:2044.
+  [doi:10.1016/j.jacc.2004.03.032](https://doi.org/10.1016/j.jacc.2004.03.032)
+  — the CFAE definition, background for `sec_peak_count` (§1.4).
 
 ### Entropy + complexity
 
 - **Shannon CE.** *A Mathematical Theory of Communication.* Bell System
-  Technical Journal 1948. [Original Shannon entropy.]
-- **Pincus SM.** *Approximate entropy as a measure of system
-  complexity.* PNAS 1991. [ApEn, predecessor of SampEn; parameter
-  guidance.]
+  Technical Journal 1948;27:379.
+  [doi:10.1002/j.1538-7305.1948.tb01338.x](https://doi.org/10.1002/j.1538-7305.1948.tb01338.x)
+  — the original entropy, underneath `shannon_entropy` (§3.2) and
+  `entropy_pairs` (§4.8.3).
+- **Pincus SM.** *Approximate entropy as a measure of system complexity.*
+  PNAS 1991;88:2297.
+  [doi:10.1073/pnas.88.6.2297](https://doi.org/10.1073/pnas.88.6.2297)
+  — ApEn, predecessor of SampEn; the source of our $m$ and $r$ defaults.
 - **Richman JS, Moorman JR.** *Physiological time-series analysis using
-  approximate entropy and sample entropy.* Am J Physiol Heart Circ
-  Physiol 2000. [Sample entropy.]
-- **Inouye T et al.** *Quantification of EEG irregularity by use of
-  the entropy of the power spectrum.* Electroencephalogr Clin
-  Neurophysiol 1991. [Spectral entropy in biomedical signals.]
+  approximate entropy and sample entropy.* Am J Physiol Heart Circ Physiol
+  2000;278:H2039.
+  [doi:10.1152/ajpheart.2000.278.6.H2039](https://doi.org/10.1152/ajpheart.2000.278.6.H2039)
+  — sample entropy (§3.1).
+- **Inouye T et al.** *Quantification of EEG irregularity by use of the
+  entropy of the power spectrum.* Electroencephalogr Clin Neurophysiol
+  1991;79:204. *(No verified DOI.)* — spectral entropy in biomedical
+  signals (§2.3).
 
 ### Fractal + LZ
 
-- **Higuchi T.** *Approach to an irregular time series on the basis of
-  the fractal theory.* Physica D 1988. [The Higuchi fractal dimension
-  algorithm.]
-- **Lempel A, Ziv J.** *On the complexity of finite sequences.* IEEE
-  Trans Inf Theory 1976. [LZ76, the algorithm underneath
-  `lempel_ziv_complexity`.]
+- **Higuchi T.** *Approach to an irregular time series on the basis of the
+  fractal theory.* Physica D 1988;31:277.
+  [doi:10.1016/0167-2789(88)90081-4](https://doi.org/10.1016/0167-2789(88)90081-4)
+  — the Higuchi fractal-dimension algorithm (§3.4).
+- **Lempel A, Ziv J.** *On the complexity of finite sequences.* IEEE Trans
+  Inf Theory 1976;22:75.
+  [doi:10.1109/TIT.1976.1055501](https://doi.org/10.1109/TIT.1976.1055501)
+  — LZ76, underneath `lempel_ziv_complexity` (§3.3).
 - **Aboy M, Hornero R, Abásolo D, Álvarez D.** *Interpretation of the
   Lempel-Ziv complexity measure in the context of biomedical signal
-  analysis.* IEEE Trans Biomed Eng 2006. [LZ applied to physiological
-  signals.]
+  analysis.* IEEE Trans Biomed Eng 2006;53:2282. *(No verified DOI.)* — LZ
+  applied to physiological signals.
 - **Esteller R, Vachtsevanos G, Echauz J, Litt B.** *A comparison of
   waveform fractal dimension algorithms.* IEEE Trans Circuits Syst I
-  2001. [Comparison of Higuchi vs Katz vs Petrosian methods.]
+  2001;48:177. *(No verified DOI.)* — Higuchi vs Katz vs Petrosian.
+
+### catch22 (§4)
+
+- **Lubba CH, Sethi SS, Knaute P, Schultz SR, Fulcher BD, Jones NS.**
+  *catch22: CAnonical Time-series CHaracteristics.* Data Mining and
+  Knowledge Discovery 2019;33:1821.
+  [doi:10.1007/s10618-019-00647-x](https://doi.org/10.1007/s10618-019-00647-x)
+  · [arXiv:1901.10200](https://arxiv.org/abs/1901.10200)
+  — the feature-selection method and the 22-feature set. All of §4.
+- **Fulcher BD, Jones NS.** *hctsa: A Computational Framework for Automated
+  Time-Series Phenotyping Using Massive Feature Extraction.* Cell Systems
+  2017;5:527.
+  [doi:10.1016/j.cels.2017.10.001](https://doi.org/10.1016/j.cels.2017.10.001)
+  — the ~7700-feature library catch22 distils.
+- **Fulcher BD, Little MA, Jones NS.** *Highly comparative time-series
+  analysis: the empirical structure of time series and their methods.*
+  J R Soc Interface 2013;10:20130048.
+  [doi:10.1098/rsif.2013.0048](https://doi.org/10.1098/rsif.2013.0048)
+- **Fulcher-lab feature documentation** —
+  [time-series-features.gitbook.io/catch22](https://time-series-features.gitbook.io/catch22/information-about-catch22/feature-descriptions/feature-overview-table)
+  — per-feature descriptions and the hctsa↔catch22 name mapping; the
+  authority [§4.1.2](#412-naming--the-hctsa-code-is-the-source-of-truth)'s
+  naming correction is checked against.
+- **Welch PD.** *The use of fast Fourier transform for the estimation of
+  power spectra.* IEEE Trans Audio Electroacoust 1967;15:70.
+  [doi:10.1109/TAU.1967.1161901](https://doi.org/10.1109/TAU.1967.1161901)
+  — the spectrum behind `low_freq_power` (§4.4.4) and `centroid_freq`
+  (§4.4.5).
+- **Fraser AM, Swinney HL.** *Independent coordinates for strange
+  attractors from mutual information.* Phys Rev A 1986;33:1134.
+  [doi:10.1103/PhysRevA.33.1134](https://doi.org/10.1103/PhysRevA.33.1134)
+  — first-AMI-minimum embedding delay: `ami_timescale` (§4.4.6), `ami2`
+  (§4.5.2).
+- **Takens F.** *Detecting strange attractors in turbulence.* Lecture Notes
+  in Mathematics 1981;898:366.
+  [doi:10.1007/BFb0091924](https://doi.org/10.1007/BFb0091924)
+  — time-delay embedding: `embedding_dist` (§4.10.1).
+- **Schreiber T, Schmitz A.** *Surrogate time series.* Physica D
+  2000;142:346.
+  [doi:10.1016/S0167-2789(00)00043-9](https://doi.org/10.1016/S0167-2789(00)00043-9)
+  — time-reversibility: `trev` (§4.5.1).
+- **Mietus JE, Peng C-K, Henry I, Goldsmith RL, Goldberger AL.** *The pNNx
+  files: re-examining a widely used heart rate variability measure.* Heart
+  2002;88:378.
+  [PMC1767394](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC1767394/)
+  — pNN40: `high_fluctuation` (§4.7.1).
+- **Wang X, Wirth A, Wang L.** *Structure-based Statistical Features and
+  Multivariate Time Series Clustering.* Proc IEEE ICDM 2007:351.
+  [ieeexplore 4470259](https://ieeexplore.ieee.org/document/4470259/)
+  — `periodicity` (§4.4.3).
+- **Peng C-K, Buldyrev SV, Havlin S, Simons M, Stanley HE, Goldberger AL.**
+  *Mosaic organization of DNA nucleotides.* Phys Rev E 1994;49:1685.
+  [doi:10.1103/PhysRevE.49.1685](https://doi.org/10.1103/PhysRevE.49.1685)
+  — detrended fluctuation analysis: `dfa` (§4.9.2).
+- **Caccia DC, Percival D, Cannon MJ, Raymond G, Bassingthwaighte JB.**
+  *Analyzing exact fractal time series: evaluating dispersional analysis
+  and rescaled range methods.* Physica A 1997;246:609.
+  [doi:10.1016/S0378-4371(97)00363-4](https://doi.org/10.1016/S0378-4371(97)00363-4)
+  — `rs_range` (§4.9.1).
+- `intracardiac-platform/project/investigations/catch22_techniques_explained.md`
+  — the project's full walk-through of all 22, at greater depth than §4,
+  with the per-feature EGM-relevance discussion this section condenses.
 
 ### Project context
 
-- **Sanchez J et al. 2021.** *Using Machine Learning to Characterize
-  Atrial Fibrotic Substrate From Intracardiac Signals With a Hybrid in
-  silico and in vivo Dataset.* Frontiers in Physiology. The paper this
-  feature set most closely tracks — Sanchez used a 7-feature subset
-  (peak-to-peak, duration, sample entropy, Shannon entropy, spectral
-  entropy, Kolmogorov complexity, fractal dimension) and trained a
-  decision tree classifier. The 11 features here are Sanchez's 7 plus
-  four more (`zero_crossings`, `activation_position`, `sec_peak_count`,
-  `dominant_frequency`) added during the v1_baseline diagnostic.
-- See `intracardiac-platform/project/architecture_reading_list.md` for
-  the broader literature this project draws on.
+- **Sánchez J et al.** *Using Machine Learning to Characterize Atrial
+  Fibrotic Substrate From Intracardiac Signals With a Hybrid in silico and
+  in vivo Dataset.* Frontiers in Physiology 2021;12:699291.
+  [full text](https://www.frontiersin.org/journals/physiology/articles/10.3389/fphys.2021.699291/full)
+  — the paper this feature set most closely tracks. Sánchez used a
+  7-feature subset (peak-to-peak, duration, sample entropy, Shannon
+  entropy, spectral entropy, Kolmogorov complexity, fractal dimension) and
+  trained a decision-tree classifier. Our §1–§3 eleven are those seven plus
+  `zero_crossings`, `activation_position`, `sec_peak_count`, and
+  `dominant_frequency`, added during the v1_baseline diagnostic; §4 adds
+  the catch22 set on top.
+- `intracardiac-platform/project/architecture_reading_list.md` — the
+  broader literature this project draws on.

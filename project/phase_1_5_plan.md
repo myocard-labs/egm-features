@@ -101,6 +101,14 @@ Our names also diverge for `transition_variance` (pycatch22: `transition_matrix`
 `NDArray, shape (T,)` contract is unchanged. Cost is one 512-element list build per trace —
 expected negligible next to `sample_entropy`'s O(T²), and S7 measures it rather than assuming.
 
+**D7a · `NaN` must be *warned about*, not just propagated.** *(Daniel, review of S1.)* Propagating
+silently is its own failure mode: a 10,000-trace extraction can run for minutes, and discovering
+afterwards that a channel produced all-`NaN` wastes the whole run. So the batch path emits **one
+aggregated `RuntimeWarning` per call** — naming how many traces and which features were affected —
+rather than one per trace, which would drown the output and slow the loop. The `NaN` values still
+flow through unchanged; the warning is diagnostic only. Implemented in S3 (primitive) + S6 (batch
+aggregation), tested in both. Documented in theory.md §4.1.4.
+
 **D7 · Degenerate input propagates `NaN`.** A constant 512-sample signal returns **NaN for 19 of
 22** features. We propagate rather than substitute a sentinel: a silent `0.0` would be swallowed
 into MMD / energy distances as a real coordinate and quietly bias STU4's realistic region, whereas a
@@ -195,7 +203,7 @@ states its verification. ☐ todo · 🔨 wip · ✅ done.
 > construction; **CI is the authority**, and I'll read the lint/type job on push rather than claim
 > local mypy cleanliness.
 
-### S1 — `docs/theory.md` §4: catch22 ☐ (est. 2–4 h)
+### S1 — `docs/theory.md` §4: catch22 ✅ (est. 2–4 h)
 
 - **Change:** New §4 covering all 22 catch22 features plus the catch24 pair, organised by the eight
   Fulcher-lab families. Per feature: definition, the hctsa code it maps to, our short name, a worked
@@ -207,9 +215,16 @@ states its verification. ☐ todo · 🔨 wip · ✅ done.
   rather than replace them); renumber §4 References → §5. **Correct the Notation section's
   "Default 512" to `T = 192 @ 1 kHz`** and carry 192 through every §4 worked anchor (D12), and record
   the short-window reliability read per feature.
-- **Verify:** every name the registry will ship has a §4 entry; every worked anchor is one S4/S6 will
-  actually assert, computed at `T = 192`; no stale "512" left in the doc; links resolve.
+- **Verify:** ✅ all 24 short names **and** all 24 hctsa codes appear in §4; **64 worked anchors
+  machine-checked against a fresh `pycatch22` run — 0 mismatches**; the 19-of-22 NaN claim confirmed;
+  no broken in-page anchors; ruff clean; 76 tests pass. The anchors are now the spec S4/S6 assert.
 - **Depends on:** none. *Theory-first — this lands before any catch22 code.*
+- **Surfaced (not fixed here):** two §1–§3 parameter choices were justified at `T = 512` and are now
+  approximate at 192 — `shannon_entropy`'s `n_bins = 10` (Sturges gives ≈9.6 at 192) and the
+  frequency resolution `fs/T`, which coarsens 2 Hz → 5.2 Hz and costs `dominant_frequency` precision.
+  **Deliberately left unchanged**: moving either would shift every affected feature value and break
+  comparability with Phase-1 banks. Documented in the Notation section; **route to the project-lead if
+  we want them re-derived at 192**, since it would be a feature-value change consumers see.
 
 ### S2 — Optional extra + provider seam ☐ (est. 1.5–3 h)
 
@@ -228,6 +243,8 @@ states its verification. ☐ todo · 🔨 wip · ✅ done.
 - **Change:** `HCTSA_TO_NAME` (D5) and `catch22_all(signal, *, catch24=False) -> dict[str, float]` —
   ndarray→list at the boundary (D6), keyed by **our** names via the hctsa codes, one C call for the
   full set (D4).
+  Also the per-call `NaN` detection D7a needs (return which features were `NaN`, don't warn here —
+  the batch layer aggregates).
 - **Verify:** a test asserting `HCTSA_TO_NAME` maps `SP_Summaries_welch_rect_area_5_1` →
   `low_freq_power` and `..._centroid` → `centroid_freq`, with the two-sine discriminating case from
   D5 as the evidence — this is the regression guard against pycatch22's crossed labels. Plus: 22/24
@@ -265,7 +282,10 @@ states its verification. ☐ todo · 🔨 wip · ✅ done.
 - **Verify:** default output is byte-for-byte the current 11 columns; a selected subset returns
   exactly those columns in registry order; per-row values agree with the individual extractors; a
   degenerate trace yields NaN rather than raising (D7); a test asserts the batch path issues **one**
-  `catch22_all` call per trace regardless of how many features were selected (the D4 guard).
+  `catch22_all` call per trace regardless of how many features were selected (the D4 guard); and
+  **`pytest.warns(RuntimeWarning)`** on a batch containing a degenerate trace, asserting the message
+  names the trace count and the affected features, and that exactly **one** warning is raised for a
+  batch with many bad traces (D7a).
 - **Depends on:** S5.
 
 ### S7 — Base-install guard + CI + cost measurement ☐ (est. 1.5–3 h)
